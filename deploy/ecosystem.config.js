@@ -38,9 +38,10 @@ module.exports = {
     {
       name: "wa-automation-web",
       cwd: "./apps/web",
-      // `next start` reads the PORT env var; set it in apps/web/.env.local
-      // or export it before `pm2 start`.
-      script: "node_modules/.bin/next",
+      // Point at Next's actual JS entry file, not the .bin/next shell shim —
+      // same reason as the api app above: PM2 runs "script" with Node
+      // directly, and Node can't parse a shell script.
+      script: "node_modules/next/dist/bin/next",
       args: "start -p 3300",
       instances: 1,
       exec_mode: "fork",
