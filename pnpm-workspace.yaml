@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native/postinstall builds we explicitly trust.
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - msgpackr-extract
+  - unrs-resolver
