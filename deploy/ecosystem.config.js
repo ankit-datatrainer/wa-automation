@@ -20,7 +20,10 @@ module.exports = {
       // native TS execution requires explicit file extensions on relative
       // imports that this codebase doesn't use. tsx's resolver handles this
       // correctly, matching how `pnpm dev` already runs it locally.
-      script: "node_modules/.bin/tsx",
+      // Point at tsx's actual JS entry file, not the .bin/tsx shell shim —
+      // PM2 runs "script" with Node directly, and Node can't parse a shell
+      // script.
+      script: "node_modules/tsx/dist/cli.mjs",
       args: "src/server.ts",
       instances: 1,
       exec_mode: "fork",
