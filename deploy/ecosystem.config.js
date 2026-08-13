@@ -1,0 +1,47 @@
+/**
+ * PM2 process definitions for WA Automations.
+ *
+ * Ports 3300 (web) and 4300 (api) are chosen to avoid colliding with the
+ * other apps already running on this VPS (interviewaceai, wedding-api,
+ * wedding-web). Check `pm2 list` and adjust PORT in each app's .env if either
+ * is already taken.
+ *
+ * Usage (from the repo root on the VPS):
+ *   pm2 start deploy/ecosystem.config.js
+ *   pm2 save
+ */
+module.exports = {
+  apps: [
+    {
+      name: "wa-automation-api",
+      cwd: "./apps/api",
+      script: "dist/server.js",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+      },
+      max_memory_restart: "300M",
+      out_file: "../../logs/wa-automation-api.out.log",
+      error_file: "../../logs/wa-automation-api.err.log",
+      time: true,
+    },
+    {
+      name: "wa-automation-web",
+      cwd: "./apps/web",
+      // `next start` reads the PORT env var; set it in apps/web/.env.local
+      // or export it before `pm2 start`.
+      script: "node_modules/.bin/next",
+      args: "start -p 3300",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+      },
+      max_memory_restart: "400M",
+      out_file: "../../logs/wa-automation-web.out.log",
+      error_file: "../../logs/wa-automation-web.err.log",
+      time: true,
+    },
+  ],
+};
