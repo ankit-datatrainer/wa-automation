@@ -15,7 +15,13 @@ module.exports = {
     {
       name: "wa-automation-api",
       cwd: "./apps/api",
-      script: "dist/server.js",
+      // Run via tsx (not `node dist/server.js`) — the @wa/types workspace
+      // package ships raw .ts source with no build step, and plain Node's
+      // native TS execution requires explicit file extensions on relative
+      // imports that this codebase doesn't use. tsx's resolver handles this
+      // correctly, matching how `pnpm dev` already runs it locally.
+      script: "node_modules/.bin/tsx",
+      args: "src/server.ts",
       instances: 1,
       exec_mode: "fork",
       env: {

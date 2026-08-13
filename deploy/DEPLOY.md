@@ -22,7 +22,8 @@ cd wa-automation
 ```bash
 pnpm install
 # @wa/types has no build step — both apps transpile its TS source directly.
-pnpm --filter @wa/api build
+# The API runs via tsx in production (see ecosystem.config.js), so no build
+# step is required for it either — only the web app needs building.
 pnpm --filter @wa/web build
 ```
 
