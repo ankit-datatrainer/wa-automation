@@ -7,6 +7,10 @@ const config: Config = {
   theme: {
     container: { center: true, padding: "1.5rem" },
     extend: {
+      fontFamily: {
+        sans: ["var(--font-poppins)", "Poppins", "ui-sans-serif", "system-ui", "sans-serif"],
+        poppins: ["var(--font-poppins)", "Poppins", "sans-serif"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

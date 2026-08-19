@@ -79,7 +79,7 @@ export default function ApiDocsPage() {
     <>
       <PageHeader
         title="API Docs"
-        description="Programmatic access to your WA Automations workspace."
+        description="Programmatic access to your WA Automation workspace."
       />
 
       <div className="space-y-4">
@@ -145,7 +145,7 @@ export default function ApiDocsPage() {
               <EmptyState
                 icon={KeyRound}
                 title="No API keys yet"
-                description="Create a key to call the WA Automations API from your own systems."
+                description="Create a key to call the WA Automation API from your own systems."
               />
             ) : (
               <Table>

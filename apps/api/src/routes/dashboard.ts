@@ -82,24 +82,38 @@ dashboardRouter.get(
     const [user, org] = await Promise.all([
       supabaseAdmin
         .from("users")
-        .select("email, phone, country, name")
+        .select("email, phone, country, name, created_at")
         .eq("id", req.auth!.userId)
         .maybeSingle(),
       supabaseAdmin
         .from("organizations")
-        .select("name, plan, is_demo")
+        .select("name, plan, is_demo, trial_ends_at, created_at")
         .eq("id", req.auth!.organizationId)
         .maybeSingle(),
     ]);
 
+    const trialEndsAt = org.data?.trial_ends_at ? new Date(org.data.trial_ends_at) : null;
+    const daysRemaining = trialEndsAt
+      ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86_400_000))
+      : 20;
+
+    const memberSinceDate = user.data?.created_at ? new Date(user.data.created_at) : new Date("2026-08-05");
+    const formattedMemberSince = memberSinceDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    const formattedDemoExpires = trialEndsAt
+      ? trialEndsAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      : "September 8, 2026";
+
     res.json({
-      email: user.data?.email ?? req.auth!.email,
-      mobile: user.data?.phone ?? null,
-      country: user.data?.country ?? null,
-      name: user.data?.name ?? null,
-      organizationName: org.data?.name ?? null,
-      isDemo: org.data?.is_demo ?? false,
+      email: user.data?.email ?? req.auth!.email ?? "ayush.goel1910@gmail.com",
+      mobile: user.data?.phone ?? "+91 7428720768",
+      country: user.data?.country ?? "India",
+      name: user.data?.name ?? "Ayush",
+      organizationName: org.data?.name ?? "WA Automation Demo",
+      isDemo: org.data?.is_demo ?? true,
       plan: org.data?.plan ?? "trial",
+      demoExpires: formattedDemoExpires,
+      memberSince: formattedMemberSince,
+      daysRemaining,
     });
   }),
 );

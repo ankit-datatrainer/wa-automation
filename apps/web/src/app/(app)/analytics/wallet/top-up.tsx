@@ -94,7 +94,7 @@ export function WalletTopUp() {
           key: order.keyId,
           amount: order.amount * 100,
           currency: order.currency,
-          name: "WA Automations",
+          name: "WA Automation",
           description: "Wallet top-up",
           order_id: order.orderId,
           handler: async (response: RazorpayResponse) => {

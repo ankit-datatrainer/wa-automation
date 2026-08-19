@@ -8,7 +8,7 @@ import { probeRedis } from "./queues/connection.js";
 const app = createApp();
 
 const server = app.listen(env.PORT, () => {
-  logger.info(`WA Automations API listening on http://localhost:${env.PORT}`);
+  logger.info(`WA Automation API listening on http://localhost:${env.PORT}`);
 });
 
 // Decide the queue driver once, before anything tries to enqueue work.

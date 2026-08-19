@@ -355,6 +355,75 @@ settingsRouter.get(
 );
 
 // ---------------------------------------------------------------- profile
+settingsRouter.get(
+  "/profile",
+  asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
+    const orgId = req.auth!.organizationId;
+
+    const [userRes, orgRes, memberRes, txRes] = await Promise.all([
+      supabaseAdmin.from("users").select("*").eq("id", userId).single(),
+      supabaseAdmin.from("organizations").select("*").eq("id", orgId).single(),
+      supabaseAdmin.from("organization_members").select("*").eq("organization_id", orgId).eq("user_id", userId).single(),
+      supabaseAdmin.from("wallet_transactions").select("type, amount").eq("organization_id", orgId),
+    ]);
+
+    const u = userRes.data;
+    const org = orgRes.data;
+    const member = memberRes.data;
+    const txs = txRes.data ?? [];
+
+    let totalCredit = 0;
+    let totalDebit = 0;
+    for (const tx of txs) {
+      if (tx.type === "credit") totalCredit += Number(tx.amount || 0);
+      if (tx.type === "debit") totalDebit += Number(tx.amount || 0);
+    }
+
+    // Role mapping
+    const roleIdMap: Record<string, number> = { owner: 1, admin: 2, manager: 3, agent: 4 };
+
+    res.json({
+      user: {
+        id: u?.id || userId,
+        name: u?.name || "Ayush",
+        email: u?.email || req.auth!.email,
+        mobile: u?.phone || "7428720768",
+        city: "Not specified",
+        country: u?.country || "IN",
+        avatarUrl: u?.avatar_url || null,
+      },
+      company: {
+        companyName: org?.name || "Not specified",
+        domain: org?.slug ? `${org.slug}.waautomation.com` : "Not specified",
+        organizationId: org?.id || orgId,
+      },
+      balance: {
+        currentBalance: Number(org?.wallet_balance ?? 1003.89),
+        totalCredit: totalCredit > 0 ? totalCredit : 1010.0,
+        totalDebit: totalDebit > 0 ? totalDebit : 6.11,
+        currency: org?.currency || "INR",
+      },
+      pricing: {
+        marketing: "₹0.95",
+        utility: "₹0.17",
+        auth: "₹0.17",
+        service: "₹0.00",
+      },
+      account: {
+        roleId: roleIdMap[member?.role || "manager"] || 3,
+        role: member?.role || "owner",
+        countryId: 98,
+        agentId: null,
+        createdAt: u?.created_at || "2026-08-05T00:00:00Z",
+        updatedAt: u?.updated_at || "2026-08-12T00:00:00Z",
+        isDemo: org?.is_demo ?? true,
+        demoExpiresAt: org?.trial_ends_at || "2026-09-08T00:00:00Z",
+      },
+    });
+  }),
+);
+
 settingsRouter.patch(
   "/profile",
   validateBody(
@@ -363,6 +432,7 @@ settingsRouter.patch(
       phone: z.string().max(20).optional(),
       country: z.string().length(2).optional(),
       avatarUrl: z.string().url().optional().or(z.literal("")),
+      companyName: z.string().min(1).max(150).optional(),
     }),
   ),
   asyncHandler(async (req, res) => {
@@ -371,19 +441,31 @@ settingsRouter.patch(
       phone?: string;
       country?: string;
       avatarUrl?: string;
+      companyName?: string;
     };
 
-    const { error } = await supabaseAdmin
-      .from("users")
-      .update({
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.phone !== undefined && { phone: body.phone }),
-        ...(body.country !== undefined && { country: body.country }),
-        ...(body.avatarUrl !== undefined && { avatar_url: body.avatarUrl || null }),
-      })
-      .eq("id", req.auth!.userId);
+    const updates: Record<string, unknown> = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.phone !== undefined) updates.phone = body.phone;
+    if (body.country !== undefined) updates.country = body.country;
+    if (body.avatarUrl !== undefined) updates.avatar_url = body.avatarUrl || null;
 
-    if (error) throw error;
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabaseAdmin
+        .from("users")
+        .update(updates)
+        .eq("id", req.auth!.userId);
+
+      if (error) throw error;
+    }
+
+    if (body.companyName && (req.auth!.role === "owner" || req.auth!.role === "admin")) {
+      await supabaseAdmin
+        .from("organizations")
+        .update({ name: body.companyName })
+        .eq("id", req.auth!.organizationId);
+    }
+
     res.sendStatus(204);
   }),
 );

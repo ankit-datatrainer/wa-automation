@@ -30,7 +30,7 @@ const PROVIDERS = [
   {
     provider: "zapier",
     name: "Zapier",
-    description: "Connect WA Automations to thousands of apps without writing code.",
+    description: "Connect WA Automation to thousands of apps without writing code.",
     icon: Zap,
     field: { key: "hookUrl", label: "Zapier hook URL", placeholder: "https://hooks.zapier.com/..." },
   },
@@ -83,7 +83,7 @@ export default function IntegrationsPage() {
     <>
       <PageHeader
         title="Integrations"
-        description="Connect WA Automations to the rest of your stack."
+        description="Connect WA Automation to the rest of your stack."
       />
 
       {integrations.isLoading ? (

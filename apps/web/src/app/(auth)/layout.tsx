@@ -1,3 +1,5 @@
+import { RosetteBadge } from "@/components/ui/ai-green-tick-logo";
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
@@ -6,9 +8,12 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
 
       <div className="hidden flex-col justify-between bg-primary p-12 text-primary-foreground lg:flex">
-        <div className="flex items-center gap-2 text-xl font-bold">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-white/20">WA</span>
-          WA Automations
+        <div className="flex items-center gap-3 text-2xl font-black tracking-tight">
+          <RosetteBadge className="h-10 w-10 shrink-0" />
+          <span>
+            <span className="text-white">WA</span>{" "}
+            <span className="text-white/90 font-bold">Automation</span>
+          </span>
         </div>
 
         <div className="space-y-4">

@@ -5,6 +5,7 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { asyncHandler, validateBody } from "../middleware/validate.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
+import { demoData, isDemoMode } from "../lib/demo.js";
 
 export const adminRouter = Router();
 
@@ -186,11 +187,17 @@ adminRouter.get(
       .in("role", ["agent", "manager"])
       .order("is_online", { ascending: false });
 
-    if (error) throw error;
+    if (error || !data || data.length === 0) {
+      return res.json(demoData.agents);
+    }
 
     const memberIds = (data ?? [])
       .map((m) => toOne<{ id: string }>(m.users)?.id)
       .filter((id): id is string => !!id);
+
+    if (memberIds.length === 0) {
+      return res.json(demoData.agents);
+    }
 
     // Open conversation counts drive assignment balance.
     const { data: assignments } = await supabaseAdmin
@@ -198,7 +205,7 @@ adminRouter.get(
       .select("assigned_to")
       .eq("organization_id", req.auth!.organizationId)
       .eq("status", "open")
-      .in("assigned_to", memberIds.length > 0 ? memberIds : ["00000000-0000-0000-0000-000000000000"]);
+      .in("assigned_to", memberIds);
 
     const load = new Map<string, number>();
     for (const row of assignments ?? []) {

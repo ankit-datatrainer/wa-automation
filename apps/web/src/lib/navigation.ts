@@ -14,13 +14,14 @@ import {
   History,
   Inbox,
   Kanban,
-  LayoutDashboard,
+  LayoutGrid,
   LifeBuoy,
   ListChecks,
   MessageCircle,
   MessageSquare,
   Megaphone,
   Package,
+  Phone,
   Radio,
   Receipt,
   ScrollText,
@@ -66,6 +67,8 @@ export const platformNavigation: NavSection = {
     { label: "Platform Overview", href: "/platform", icon: Globe, badge: "Platform" },
     { label: "Organizations", href: "/platform/organizations", icon: Building2 },
     { label: "Plans", href: "/platform/plans", icon: CreditCard },
+    { label: "WhatsApp Numbers", href: "/platform/waba", icon: Phone },
+    { label: "Support Desk", href: "/platform/support", icon: LifeBuoy },
     { label: "All Users", href: "/platform/users", icon: Users },
     { label: "Platform Audit", href: "/platform/audit", icon: ScrollText },
   ],
@@ -74,7 +77,7 @@ export const platformNavigation: NavSection = {
 export const navigation: NavSection[] = [
   {
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Dashboard", href: "/dashboard", icon: LayoutGrid },
       { label: "Inbox", href: "/inbox", icon: Inbox },
       { label: "Chat History", href: "/chat-history", icon: History },
       { label: "Contacts", href: "/contacts", icon: Users },

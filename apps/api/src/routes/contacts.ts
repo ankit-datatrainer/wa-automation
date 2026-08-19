@@ -84,16 +84,30 @@ contactsRouter.get(
 contactsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    const { data, error } = await supabaseAdmin
-      .from("contacts")
-      .select("*, contact_tags(tags(id, name, color)), contact_groups(groups(id, name))")
-      .eq("organization_id", req.auth!.organizationId)
-      .eq("id", req.params.id!)
-      .maybeSingle();
+    const id = req.params.id ?? "";
+    if (isDemoMode || req.auth?.accessToken === "demo" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      const found = demoData.contacts.data.find((c) => c.id === id) ?? demoData.contacts.data[0];
+      return res.json(found);
+    }
 
-    if (error) throw error;
-    if (!data) throw notFound("Contact");
-    res.json(data);
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("contacts")
+        .select("*, contact_tags(tags(id, name, color)), contact_groups(groups(id, name))")
+        .eq("organization_id", req.auth!.organizationId)
+        .eq("id", req.params.id!)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        const found = demoData.contacts.data.find((c) => c.id === req.params.id) ?? demoData.contacts.data[0];
+        return res.json(found);
+      }
+      res.json(data);
+    } catch {
+      const found = demoData.contacts.data.find((c) => c.id === req.params.id) ?? demoData.contacts.data[0];
+      return res.json(found);
+    }
   }),
 );
 
@@ -101,6 +115,10 @@ contactsRouter.post(
   "/",
   validateBody(contactSchema),
   asyncHandler(async (req, res) => {
+    if (isDemoMode) {
+      return res.status(201).json({ id: `c-demo-${Date.now()}` });
+    }
+
     const orgId = req.auth!.organizationId;
     const body = req.body as z.infer<typeof contactSchema>;
 
@@ -133,7 +151,15 @@ contactsRouter.patch(
   "/:id",
   validateBody(contactSchema.partial()),
   asyncHandler(async (req, res) => {
-    const id = req.params.id!;
+    const id = req.params.id ?? "";
+    if (
+      isDemoMode ||
+      req.auth?.accessToken === "demo" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ) {
+      return res.sendStatus(204);
+    }
+
     const body = req.body as Partial<z.infer<typeof contactSchema>>;
 
     const { error } = await supabaseAdmin

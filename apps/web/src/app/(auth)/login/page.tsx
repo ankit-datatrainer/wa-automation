@@ -42,7 +42,7 @@ function LoginForm() {
       <div className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight">Welcome back</h1>
         <p className="text-sm text-muted-foreground">
-          Sign in to your WA Automations account.
+          Sign in to your WA Automation account.
         </p>
       </div>
 

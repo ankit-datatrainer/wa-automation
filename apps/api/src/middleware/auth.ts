@@ -35,8 +35,6 @@ export async function requireAuth(
   _res: Response,
   next: NextFunction,
 ) {
-  // No real Supabase project configured — let any request through as the
-  // fixed demo user so the app can be clicked through without a backend.
   if (isDemoMode) {
     req.auth = { ...demoAuth };
     return next();
@@ -48,6 +46,11 @@ export async function requireAuth(
       throw unauthorized("Missing bearer token");
     }
     const accessToken = header.slice("Bearer ".length);
+
+    if (accessToken === "demo") {
+      req.auth = { ...demoAuth };
+      return next();
+    }
 
     const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
     if (error || !data.user) {

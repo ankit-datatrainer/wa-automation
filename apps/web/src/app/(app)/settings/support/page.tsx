@@ -31,8 +31,8 @@ const CHANNELS = [
     icon: Mail,
     title: "Email us",
     description: "For billing questions or anything that doesn't fit a ticket.",
-    href: "mailto:support@waautomations.com",
-    action: "support@waautomations.com",
+    href: "mailto:support@waautomation.com",
+    action: "support@waautomation.com",
   },
 ];
 

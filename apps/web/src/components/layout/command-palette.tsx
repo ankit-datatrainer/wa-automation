@@ -28,7 +28,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     <Command.Dialog
       open={open}
       onOpenChange={onOpenChange}
-      label="Search WA Automations"
+      label="Search WA Automation"
       className="fixed left-1/2 top-[20%] z-50 w-full max-w-xl -translate-x-1/2 overflow-hidden rounded-xl border bg-background shadow-2xl"
     >
       <Command.Input

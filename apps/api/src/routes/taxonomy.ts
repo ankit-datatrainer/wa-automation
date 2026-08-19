@@ -35,7 +35,9 @@ taxonomyRouter.get(
       .eq("organization_id", orgId)
       .order("name");
 
-    if (error) throw error;
+    if (error || !data || data.length === 0) {
+      return res.json(demoData.tags);
+    }
 
     res.json({
       data: (data ?? []).map((tag) => ({
@@ -53,6 +55,11 @@ taxonomyRouter.post(
   "/tags",
   validateBody(tagSchema),
   asyncHandler(async (req, res) => {
+    if (isDemoMode || req.auth?.accessToken === "demo") {
+      const body = req.body as z.infer<typeof tagSchema>;
+      return res.status(201).json({ id: `t-demo-${Date.now()}`, name: body.name, color: body.color });
+    }
+
     const body = req.body as z.infer<typeof tagSchema>;
     const { data, error } = await supabaseAdmin
       .from("tags")
@@ -70,6 +77,10 @@ taxonomyRouter.patch(
   "/tags/:id",
   validateBody(tagSchema.partial()),
   asyncHandler(async (req, res) => {
+    if (isDemoMode || req.auth?.accessToken === "demo") {
+      return res.sendStatus(204);
+    }
+
     const { error, count } = await supabaseAdmin
       .from("tags")
       .update(req.body as Record<string, unknown>, { count: "exact" })
@@ -86,6 +97,10 @@ taxonomyRouter.patch(
 taxonomyRouter.delete(
   "/tags/:id",
   asyncHandler(async (req, res) => {
+    if (isDemoMode || req.auth?.accessToken === "demo") {
+      return res.sendStatus(204);
+    }
+
     const { error } = await supabaseAdmin
       .from("tags")
       .delete()
@@ -109,7 +124,9 @@ taxonomyRouter.get(
       .eq("organization_id", req.auth!.organizationId)
       .order("name");
 
-    if (error) throw error;
+    if (error || !data || data.length === 0) {
+      return res.json(demoData.groups);
+    }
 
     res.json({
       data: (data ?? []).map((group) => ({

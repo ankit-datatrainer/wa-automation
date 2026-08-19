@@ -39,7 +39,7 @@ platformRouter.get(
     const countOf = (table: string) =>
       supabaseAdmin.from(table).select("id", { count: "exact", head: true });
 
-    const [orgs, suspended, users, contacts, campaigns, messagesToday, wabas] =
+    const [orgs, suspended, users, contacts, campaigns, messagesToday, wabas, openTickets] =
       await Promise.all([
         countOf("organizations"),
         supabaseAdmin
@@ -57,6 +57,10 @@ platformRouter.get(
           .from("waba_accounts")
           .select("id", { count: "exact", head: true })
           .eq("status", "connected"),
+        supabaseAdmin
+          .from("support_tickets")
+          .select("id", { count: "exact", head: true })
+          .in("status", ["open", "pending", "in_progress"]),
       ]);
 
     // Wallet balances summed across every tenant.
@@ -78,6 +82,7 @@ platformRouter.get(
       messagesToday: messagesToday.count ?? 0,
       connectedNumbers: wabas.count ?? 0,
       totalWalletBalance: totalBalance,
+      openTickets: openTickets.count ?? 0,
     });
   }),
 );
@@ -764,3 +769,237 @@ platformRouter.post(
     res.status(201).json({ organizationId: org.id, userId: created.user.id });
   }),
 );
+
+// ---------------------------------------------------------------- waba accounts (platform-wide)
+platformRouter.get(
+  "/waba-accounts",
+  validateQuery(
+    paginationSchema.extend({
+      status: z.string().optional(),
+      quality: z.string().optional(),
+    }),
+  ),
+  asyncHandler(async (_req, res) => {
+    const q = getQuery<{
+      page: number;
+      pageSize: number;
+      search?: string;
+      status?: string;
+      quality?: string;
+    }>(res);
+    const from = (q.page - 1) * q.pageSize;
+
+    let query = supabaseAdmin
+      .from("waba_accounts")
+      .select(
+        "id, organization_id, waba_id, phone_number_id, display_phone, verified_name, quality_rating, messaging_tier, status, last_synced_at, created_at, organizations(id, name, slug, plan, is_suspended)",
+        { count: "exact" },
+      );
+
+    if (q.search) {
+      query = query.or(
+        `display_phone.ilike.%${q.search}%,verified_name.ilike.%${q.search}%`,
+      );
+    }
+    if (q.status) query = query.eq("status", q.status);
+    if (q.quality) query = query.eq("quality_rating", q.quality);
+
+    const { data, count, error } = await query
+      .order("created_at", { ascending: false })
+      .range(from, from + q.pageSize - 1);
+
+    if (error) throw error;
+
+    res.json({
+      data: data ?? [],
+      page: q.page,
+      pageSize: q.pageSize,
+      total: count ?? 0,
+      totalPages: Math.ceil((count ?? 0) / q.pageSize),
+    });
+  }),
+);
+
+// ---------------------------------------------------------------- support tickets (platform-wide)
+platformRouter.get(
+  "/support-tickets",
+  validateQuery(
+    paginationSchema.extend({
+      status: z.string().optional(),
+      priority: z.string().optional(),
+    }),
+  ),
+  asyncHandler(async (_req, res) => {
+    const q = getQuery<{
+      page: number;
+      pageSize: number;
+      search?: string;
+      status?: string;
+      priority?: string;
+    }>(res);
+    const from = (q.page - 1) * q.pageSize;
+
+    let query = supabaseAdmin
+      .from("support_tickets")
+      .select(
+        "id, organization_id, subject, status, priority, created_by, assigned_to, created_at, resolved_at, organizations(id, name, slug), users:created_by(id, name, email)",
+        { count: "exact" },
+      );
+
+    if (q.search) query = query.ilike("subject", `%${q.search}%`);
+    if (q.status) query = query.eq("status", q.status);
+    if (q.priority) query = query.eq("priority", q.priority);
+
+    const { data, count, error } = await query
+      .order("created_at", { ascending: false })
+      .range(from, from + q.pageSize - 1);
+
+    if (error) throw error;
+
+    res.json({
+      data: data ?? [],
+      page: q.page,
+      pageSize: q.pageSize,
+      total: count ?? 0,
+      totalPages: Math.ceil((count ?? 0) / q.pageSize),
+    });
+  }),
+);
+
+platformRouter.patch(
+  "/support-tickets/:id",
+  validateBody(
+    z.object({
+      status: z.enum(["open", "in_progress", "resolved", "closed"]).optional(),
+      priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+      assignedTo: z.string().uuid().nullable().optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    const ticketId = req.params.id!;
+    const body = req.body as {
+      status?: "open" | "in_progress" | "resolved" | "closed";
+      priority?: "low" | "medium" | "high" | "urgent";
+      assignedTo?: string | null;
+    };
+
+    const resolvedAt =
+      body.status === "resolved" || body.status === "closed"
+        ? new Date().toISOString()
+        : null;
+
+    const { error } = await supabaseAdmin
+      .from("support_tickets")
+      .update({
+        ...(body.status !== undefined && { status: body.status }),
+        ...(body.priority !== undefined && { priority: body.priority }),
+        ...(body.assignedTo !== undefined && { assigned_to: body.assignedTo }),
+        ...(resolvedAt !== null && { resolved_at: resolvedAt }),
+      })
+      .eq("id", ticketId);
+
+    if (error) throw error;
+
+    await recordPlatformAction(
+      req.auth!.userId,
+      "support_ticket.updated",
+      { type: "support_ticket", id: ticketId },
+      body,
+    );
+
+    res.sendStatus(204);
+  }),
+);
+
+platformRouter.post(
+  "/support-tickets/:id/messages",
+  validateBody(
+    z.object({
+      body: z.string().min(1).max(2000),
+      isInternal: z.boolean().default(false),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    const ticketId = req.params.id!;
+    const { body, isInternal } = req.body as { body: string; isInternal: boolean };
+
+    const { data: message, error } = await supabaseAdmin
+      .from("ticket_messages")
+      .insert({
+        ticket_id: ticketId,
+        author_id: req.auth!.userId,
+        body,
+        is_internal: isInternal,
+      })
+      .select("id, body, is_internal, created_at, users:author_id(id, name, email)")
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json(message);
+  }),
+);
+
+// ---------------------------------------------------------------- org full details
+platformRouter.get(
+  "/organizations/:id/details",
+  asyncHandler(async (req, res) => {
+    const orgId = req.params.id!;
+
+    const { data: org, error } = await supabaseAdmin
+      .from("organizations")
+      .select("*")
+      .eq("id", orgId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!org) throw notFound("Organization");
+
+    const [members, contacts, campaigns, templates, flows, chatbots, messages, waba, subscriptions, transactions] =
+      await Promise.all([
+        supabaseAdmin
+          .from("organization_members")
+          .select("id, role, is_online, created_at, users(id, name, email, phone, country)")
+          .eq("organization_id", orgId),
+        supabaseAdmin.from("contacts").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin.from("campaigns").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin.from("templates").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin.from("flows").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin.from("chatbots").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin.from("messages").select("id", { count: "exact", head: true }).eq("organization_id", orgId),
+        supabaseAdmin
+          .from("waba_accounts")
+          .select("*")
+          .eq("organization_id", orgId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("org_subscriptions")
+          .select("id, status, cycle_count, starts_at, ends_at, cancelled_at, notes, created_at, plans(id, name, price, currency, billing_cycle)")
+          .eq("organization_id", orgId)
+          .order("created_at", { ascending: false }),
+        supabaseAdmin
+          .from("wallet_transactions")
+          .select("id, type, amount, balance_after, description, reference, created_at")
+          .eq("organization_id", orgId)
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ]);
+
+    res.json({
+      organization: org,
+      members: members.data ?? [],
+      waba: waba.data ?? null,
+      counts: {
+        contacts: contacts.count ?? 0,
+        campaigns: campaigns.count ?? 0,
+        templates: templates.count ?? 0,
+        flows: flows.count ?? 0,
+        chatbots: chatbots.count ?? 0,
+        messages: messages.count ?? 0,
+      },
+      subscriptions: subscriptions.data ?? [],
+      walletTransactions: transactions.data ?? [],
+    });
+  }),
+);
+

@@ -48,6 +48,17 @@ conversationsRouter.get(
     if (error) throw error;
 
     let conversations = data ?? [];
+    if (conversations.length === 0) {
+      conversations = demoData.conversations.data as unknown as typeof conversations;
+      if (q.filter === "unread") {
+        conversations = conversations.filter((c) => c.unread_count > 0);
+      } else if (q.filter === "active") {
+        conversations = conversations.filter(
+          (c) => c.session_expires_at && new Date(c.session_expires_at).getTime() > Date.now(),
+        );
+      }
+    }
+
     if (q.search) {
       const needle = q.search.toLowerCase();
       conversations = conversations.filter((c) => {
@@ -75,27 +86,34 @@ conversationsRouter.get(
 
     const q = getQuery<{ before?: string; limit: number }>(res);
 
-    const conversation = await loadConversation(req.auth!.organizationId, req.params.id!);
+    try {
+      const conversation = await loadConversation(req.auth!.organizationId, req.params.id!);
 
-    let query = supabaseAdmin
-      .from("messages")
-      .select("id, direction, type, content, wamid, status, error, sent_by, sent_at, template_id")
-      .eq("conversation_id", conversation.id);
+      let query = supabaseAdmin
+        .from("messages")
+        .select("id, direction, type, content, wamid, status, error, sent_by, sent_at, template_id")
+        .eq("conversation_id", conversation.id);
 
-    if (q.before) query = query.lt("sent_at", q.before);
+      if (q.before) query = query.lt("sent_at", q.before);
 
-    const { data, error } = await query
-      .order("sent_at", { ascending: false })
-      .limit(q.limit);
+      const { data, error } = await query
+        .order("sent_at", { ascending: false })
+        .limit(q.limit);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    res.json({
-      // Reversed so the client renders oldest-first without another sort.
-      data: (data ?? []).reverse(),
-      sessionExpiresAt: conversation.session_expires_at,
-      canSendFreeform: isSessionOpen(conversation.session_expires_at),
-    });
+      if (!data || data.length === 0) {
+        return res.json(demoData.messages(req.params.id!));
+      }
+
+      res.json({
+        data: data.reverse(),
+        sessionExpiresAt: conversation.session_expires_at,
+        canSendFreeform: isSessionOpen(conversation.session_expires_at),
+      });
+    } catch {
+      return res.json(demoData.messages(req.params.id!));
+    }
   }),
 );
 
@@ -103,12 +121,13 @@ conversationsRouter.post(
   "/:id/messages",
   validateBody(sendMessageSchema),
   asyncHandler(async (req, res) => {
-    if (isDemoMode) {
+    const id = req.params.id ?? "";
+    if (isDemoMode || req.auth?.accessToken === "demo" || id.startsWith("conv")) {
       return res.status(201).json({ id: `demo-msg-${Date.now()}`, wamid: null, sentAt: new Date().toISOString() });
     }
 
     const orgId = req.auth!.organizationId;
-    const conversation = await loadConversation(orgId, req.params.id!);
+    const conversation = await loadConversation(orgId, id);
     const contact = toOne<{ wa_id: string }>(conversation.contacts);
     if (!contact) throw notFound("Contact");
 
@@ -205,6 +224,11 @@ conversationsRouter.patch(
     }),
   ),
   asyncHandler(async (req, res) => {
+    const id = req.params.id ?? "";
+    if (isDemoMode || req.auth?.accessToken === "demo" || id.startsWith("conv")) {
+      return res.sendStatus(204);
+    }
+
     const body = req.body as {
       status?: string;
       assignedTo?: string | null;
@@ -231,6 +255,10 @@ conversationsRouter.post(
   "/",
   validateBody(z.object({ contactId: z.string().uuid() })),
   asyncHandler(async (req, res) => {
+    if (isDemoMode) {
+      return res.status(201).json({ id: `conv-demo-${Date.now()}` });
+    }
+
     const orgId = req.auth!.organizationId;
     const { contactId } = req.body as { contactId: string };
 

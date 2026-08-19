@@ -16,6 +16,7 @@ import { api, ApiClientError } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
 import { AssignPlanDialog } from "./assign-plan-dialog";
 import { CreateOrgDialog } from "./create-org-dialog";
+import { OrgDetailsDrawer } from "./org-details-drawer";
 
 interface Org {
   id: string;
@@ -41,6 +42,7 @@ export default function PlatformOrganizationsPage() {
   const [walletAmount, setWalletAmount] = useState("");
   const [walletNote, setWalletNote] = useState("");
   const [planTarget, setPlanTarget] = useState<Org | null>(null);
+  const [detailTarget, setDetailTarget] = useState<Org | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   const orgs = useQuery({
@@ -259,6 +261,13 @@ export default function PlatformOrganizationsPage() {
                     </TD>
                     <TD>
                       <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setDetailTarget(org)}
+                        >
+                          Inspect
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => setPlanTarget(org)}>
                           <CreditCard size={14} />
                           Plan
@@ -310,6 +319,31 @@ export default function PlatformOrganizationsPage() {
           </>
         )}
       </Card>
+
+      {detailTarget && (
+        <OrgDetailsDrawer
+          organizationId={detailTarget.id}
+          onClose={() => setDetailTarget(null)}
+          onOpenWallet={(o) => {
+            setDetailTarget(null);
+            setWalletTarget(o as Org);
+            setWalletAmount("");
+            setWalletNote("");
+          }}
+          onOpenPlan={(o) => {
+            setDetailTarget(null);
+            setPlanTarget(o as Org);
+          }}
+          onToggleSuspend={(o) => {
+            const next = !o.is_suspended;
+            const reason = next
+              ? window.prompt("Reason for suspension (shown to the tenant):") ?? undefined
+              : undefined;
+            if (next && reason === undefined) return;
+            toggleSuspend.mutate({ id: o.id, next, reason });
+          }}
+        />
+      )}
 
       {planTarget && (
         <AssignPlanDialog

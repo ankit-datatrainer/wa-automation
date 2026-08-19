@@ -119,7 +119,7 @@ export const sendMessageSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("template"),
-    templateId: z.string().uuid(),
+    templateId: z.string().min(1),
     variables: z.record(z.string()).default({}),
   }),
 ]);

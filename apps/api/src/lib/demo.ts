@@ -20,15 +20,15 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString
 
 export const demoData = {
   me: {
-    user: { id: DEMO_USER_ID, email: demoAuth.email, name: "Demo User", phone: "919266806659", country: "IN" },
+    user: { id: DEMO_USER_ID, email: "ayush.goel1910@gmail.com", name: "Ayush", phone: "+91 7428720768", country: "India" },
     organization: {
       id: DEMO_ORG_ID,
-      name: "WA Automations Demo",
-      slug: "wa-automations-demo",
+      name: "WA Automation Demo",
+      slug: "wa-automation-demo",
       plan: "trial",
-      walletBalance: 1003.89,
+      walletBalance: 1001.04,
       currency: "INR",
-      trialEndsAt: daysAgo(-27),
+      trialEndsAt: "2026-09-08T00:00:00.000Z",
       isDemo: true,
     },
     membership: { role: "owner", permissions: [] as string[] },
@@ -36,8 +36,8 @@ export const demoData = {
       id: "demo-waba",
       wabaId: "102290129340398",
       phoneNumberId: "106540352242922",
-      displayPhone: "+91 92668 06659",
-      verifiedName: "WA Automations Demo",
+      displayPhone: "+919266806659",
+      verifiedName: "WA Automation Demo",
       qualityRating: "high",
       messagingTier: "TIER_1K",
       status: "connected",
@@ -46,36 +46,42 @@ export const demoData = {
   },
 
   dashboardStats: {
-    accountDaysLeft: 27,
+    accountDaysLeft: 20,
     accountStatus: "active",
     totalTemplates: 5,
     totalReports: 13,
-    balance: 1003.89,
+    balance: 1001.04,
     currency: "INR",
     qualityRating: "high",
     perDayMessageLimit: 2000,
     messagesUsedToday: 340,
     isDemo: true,
     plan: "trial",
+    totalCredit: 1010,
+    totalDebit: 8.96,
+    demoExpires: "September 8, 2026",
+    memberSince: "August 5, 2026",
   },
 
   dashboardAccount: {
-    email: "demo@waautomations.com",
-    mobile: "+919266806659",
-    country: "IN",
-    name: "Demo User",
-    organizationName: "WA Automations Demo",
+    email: "ayush.goel1910@gmail.com",
+    mobile: "+91 7428720768",
+    country: "India",
+    name: "Ayush",
+    organizationName: "WA Automation Demo",
     isDemo: true,
     plan: "trial",
+    demoExpires: "September 8, 2026",
+    memberSince: "August 5, 2026",
+    daysRemaining: 20,
   },
 
   messageCharges: {
-    country: "IN",
+    country: "India",
     charges: [
-      { category: "marketing", price: 0.7846, currency: "INR" },
-      { category: "utility", price: 0.115, currency: "INR" },
-      { category: "authentication", price: 0.125, currency: "INR" },
-      { category: "service", price: 0, currency: "INR" },
+      { category: "marketing", price: 0.95, currency: "INR", percentage: "73.6% of total", description: "Promotional and marketing campaigns" },
+      { category: "utility", price: 0.17, currency: "INR", percentage: "13.2% of total", description: "Service updates and notifications" },
+      { category: "authentication", price: 0.17, currency: "INR", percentage: "13.2% of total", description: "OTP and verification messages" },
     ],
   },
 
@@ -84,7 +90,7 @@ export const demoData = {
     waba_id: "102290129340398",
     phone_number_id: "106540352242922",
     display_phone: "+91 92668 06659",
-    verified_name: "WA Automations Demo",
+    verified_name: "WA Automation Demo",
     quality_rating: "high",
     messaging_tier: "TIER_1K",
     status: "connected",
@@ -93,16 +99,21 @@ export const demoData = {
   },
 
   contacts: paginated([
-    { id: "c1", wa_id: "919266806659", name: "Ankit Kumar", email: "ankit@example.com", opt_in_status: "opted_in", source: "manual", created_at: daysAgo(3), contact_tags: [{ tags: { id: "t1", name: "VIP", color: "#16A34A" } }] },
-    { id: "c2", wa_id: "919812345678", name: "Priya Sharma", email: null, opt_in_status: "opted_in", source: "csv_import", created_at: daysAgo(5), contact_tags: [] },
-    { id: "c3", wa_id: "918899001122", name: "Rahul Verma", email: null, opt_in_status: "unknown", source: "whatsapp", created_at: daysAgo(1), contact_tags: [] },
-    { id: "c4", wa_id: "917766554433", name: null, email: null, opt_in_status: "opted_out", source: "whatsapp", created_at: daysAgo(10), contact_tags: [] },
+    { id: "c1", wa_id: "7738293629", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(1), contact_tags: [], contact_groups: [] },
+    { id: "c2", wa_id: "8928814237", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(2), contact_tags: [], contact_groups: [] },
+    { id: "c3", wa_id: "9811110594", name: "Piyush A", email: "piyush@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(3), contact_tags: [], contact_groups: [] },
+    { id: "c4", wa_id: "7428720768", name: "Ayush", email: "ayush.goel1910@gmail.com", attributes: {}, opt_in_status: "opted_in", source: "manual", created_at: daysAgo(4), contact_tags: [], contact_groups: [] },
+    { id: "c5", wa_id: "7838349247", name: "Ankit Kumar", email: "ankit@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(8), contact_tags: [], contact_groups: [] },
+    { id: "c6", wa_id: "9540724184", name: "Sagar", email: "sagar@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(5), contact_tags: [], contact_groups: [] },
+    { id: "c7", wa_id: "9636480218", name: "9636480218", email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(10), contact_tags: [], contact_groups: [] },
   ]),
 
   tags: {
     data: [
       { id: "t1", name: "VIP", color: "#16A34A", createdAt: now(), contactCount: 1 },
-      { id: "t2", name: "New Lead", color: "#2563EB", createdAt: now(), contactCount: 0 },
+      { id: "t2", name: "Finance", color: "#2563EB", createdAt: now(), contactCount: 1 },
+      { id: "t3", name: "SMM", color: "#8B5CF6", createdAt: now(), contactCount: 1 },
+      { id: "t4", name: "New Lead", color: "#F59E0B", createdAt: now(), contactCount: 0 },
     ],
   },
 
@@ -110,31 +121,80 @@ export const demoData = {
     data: [
       { id: "g1", name: "Delhi Customers", description: "Contacts based in Delhi NCR", createdAt: now(), contactCount: 2 },
       { id: "g2", name: "Newsletter", description: null, createdAt: now(), contactCount: 4 },
+      { id: "g3", name: "Beta Testers", description: "Early access users", createdAt: now(), contactCount: 1 },
     ],
   },
 
   conversations: {
     data: [
-      { id: "conv1", status: "open", assigned_to: null, unread_count: 1, last_message_at: daysAgo(0), last_message_preview: "Hii", session_expires_at: new Date(Date.now() + 3_600_000).toISOString(), contacts: { id: "c1", wa_id: "919266806659", name: "Ankit Kumar" } },
-      { id: "conv2", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Msme", session_expires_at: null, contacts: { id: "c2", wa_id: "919812345678", name: "Priya Sharma" } },
-      { id: "conv3", status: "pending", assigned_to: null, unread_count: 1, last_message_at: daysAgo(2), last_message_preview: "No messages yet", session_expires_at: null, contacts: { id: "c3", wa_id: "918899001122", name: "Rahul Verma" } },
+      { id: "conv1", status: "open", assigned_to: null, unread_count: 1, last_message_at: "2026-08-19T17:21:00.000Z", last_message_preview: "No messages yet", session_expires_at: null, contacts: { id: "c1", wa_id: "7738293629", name: null } },
+      { id: "conv2", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Thank you for reaching out!", session_expires_at: new Date(Date.now() + 3_600_000).toISOString(), contacts: { id: "c4", wa_id: "7428720768", name: "Ayush" } },
+      { id: "conv3", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c6", wa_id: "9540724184", name: "Sagar" } },
+      { id: "conv4", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c3", wa_id: "9811110594", name: "Piyush A" } },
+      { id: "conv5", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(8), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c5", wa_id: "7838349247", name: "Ankit Kumar" } },
+      { id: "conv6", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(9), last_message_preview: "No messages yet", session_expires_at: null, contacts: { id: "c2", wa_id: "8928814237", name: null } },
+      { id: "conv7", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(10), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c7", wa_id: "9636480218", name: "9636480218" } },
     ],
   },
 
-  messages: (conversationId: string) => ({
-    data: [
-      { id: "m1", direction: "inbound", type: "text", content: { text: "Hi, I'd like to know more about your pricing." }, wamid: "wamid.demo1", status: "read", error: null, sent_by: null, sent_at: daysAgo(0), template_id: null },
-      { id: "m2", direction: "outbound", type: "text", content: { text: "Hello! Sure, let me share our plans with you." }, wamid: "wamid.demo2", status: "read", error: null, sent_by: DEMO_USER_ID, sent_at: daysAgo(0), template_id: null },
-    ],
-    sessionExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    canSendFreeform: true,
-    _conversationId: conversationId,
-  }),
+  messages: (conversationId: string) => {
+    if (conversationId === "conv1") {
+      return {
+        data: [
+          {
+            id: "m-ayush-1",
+            direction: "outbound",
+            type: "text",
+            content: { text: "Thank you for reaching out!" },
+            wamid: "wamid.demo.ayush1",
+            status: "read",
+            error: null,
+            sent_by: DEMO_USER_ID,
+            sent_at: "2026-08-08T13:13:00.000Z",
+            template_id: null,
+          },
+          {
+            id: "m-ayush-2",
+            direction: "outbound",
+            type: "template",
+            content: {
+              templateName: "welcome_brand",
+              text: "Welcome to aiGreenTick! Empowering your brand with WhatsApp business automation.",
+              mediaUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
+            },
+            wamid: "wamid.demo.ayush2",
+            status: "delivered",
+            error: null,
+            sent_by: DEMO_USER_ID,
+            sent_at: "2026-08-11T15:20:00.000Z",
+            template_id: "tpl1",
+          },
+        ],
+        sessionExpiresAt: null,
+        canSendFreeform: false,
+        _conversationId: conversationId,
+      };
+    }
+
+    return {
+      data: [
+        { id: "m1", direction: "inbound", type: "text", content: { text: "Hi, I'd like to know more about your pricing and features." }, wamid: "wamid.demo1", status: "read", error: null, sent_by: null, sent_at: daysAgo(0), template_id: null },
+        { id: "m2", direction: "outbound", type: "text", content: { text: "Hello! Sure, let me share our plans and setup guide with you." }, wamid: "wamid.demo2", status: "read", error: null, sent_by: DEMO_USER_ID, sent_at: daysAgo(0), template_id: null },
+      ],
+      sessionExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      canSendFreeform: true,
+      _conversationId: conversationId,
+    };
+  },
 
   templates: paginated([
-    { id: "tpl1", name: "order_confirmation", language: "en", category: "utility", components: { body: { text: "Hi {{1}}, your order {{2}} has been confirmed." } }, status: "approved", rejection_reason: null, meta_template_id: "meta-1", created_at: daysAgo(6) },
-    { id: "tpl2", name: "diwali_offer", language: "en", category: "marketing", components: { body: { text: "🎉 Diwali special! Get 20% off with code DIWALI20." } }, status: "pending", rejection_reason: null, meta_template_id: null, created_at: daysAgo(2) },
-    { id: "tpl3", name: "otp_login", language: "en", category: "authentication", components: { body: { text: "Your OTP is {{1}}. Valid for 5 minutes." } }, status: "approved", rejection_reason: null, meta_template_id: "meta-3", created_at: daysAgo(8) },
+    { id: "tpl1", name: "peculiex_finvoq", language: "en", category: "marketing", components: { header: { type: "IMAGE" }, body: { text: "Hi {{1}}, welcome to Peculiex Finvoq! Explore our automated invoice and billing solution." }, buttons: [{ type: "URL", text: "Get Started" }] }, status: "approved", rejection_reason: null, meta_template_id: "meta-1", created_at: "2026-08-19T10:00:00.000Z" },
+    { id: "tpl2", name: "website_development", language: "en", category: "marketing", components: { header: { type: "IMAGE" }, body: { text: "Hi {{1}}, transform your brand with custom website design and web applications." }, buttons: [{ type: "URL", text: "View Portfolio" }] }, status: "approved", rejection_reason: null, meta_template_id: "meta-2", created_at: "2026-08-18T12:00:00.000Z" },
+    { id: "tpl3", name: "leads_whatsapp", language: "en", category: "marketing", components: { header: { type: "IMAGE" }, body: { text: "Hi {{1}}, thank you for reaching out through WhatsApp! Our consultant will connect with you shortly." }, buttons: [{ type: "QUICK_REPLY", text: "Talk to Agent" }] }, status: "approved", rejection_reason: null, meta_template_id: "meta-3", created_at: "2026-08-11T14:00:00.000Z" },
+    { id: "tpl4", name: "peculiex_1st", language: "en", category: "marketing", components: { header: { type: "IMAGE" }, body: { text: "Hello {{1}}, discover innovative technology solutions tailored for your business growth." }, buttons: [{ type: "URL", text: "Visit Website" }] }, status: "approved", rejection_reason: null, meta_template_id: "meta-4", created_at: "2026-08-06T15:00:00.000Z" },
+    { id: "tpl5", name: "msg2", language: "en", category: "utility", components: { body: { text: "Hi {{1}}, your transaction request #{{2}} has been successfully processed." }, buttons: [{ type: "QUICK_REPLY", text: "View Details" }] }, status: "approved", rejection_reason: null, meta_template_id: "meta-5", created_at: "2026-08-06T11:00:00.000Z" },
+    { id: "tpl6", name: "msg", language: "en", category: "utility", components: { body: { text: "Hi {{1}}, your account verification code is {{2}}. Valid for 10 minutes." } }, status: "approved", rejection_reason: null, meta_template_id: "meta-6", created_at: "2026-08-06T09:00:00.000Z" },
+    { id: "tpl7", name: "test", language: "en", category: "utility", components: { body: { text: "This is a test utility notification message for account {{1}}." } }, status: "approved", rejection_reason: null, meta_template_id: "meta-7", created_at: "2026-08-06T08:00:00.000Z" },
   ]),
 
   templateLibrary: {

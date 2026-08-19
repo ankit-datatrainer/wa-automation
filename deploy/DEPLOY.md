@@ -73,7 +73,8 @@ nano apps/web/.env.local
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://mwqxxlckupapyfjriacy.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your anon key>
-NEXT_PUBLIC_API_URL=https://waautomation.peculiex.com/api
+# No trailing /api — the app code appends /api/... itself.
+NEXT_PUBLIC_API_URL=https://waautomation.peculiex.com
 ```
 
 Rebuild after adding env files, since Next.js inlines `NEXT_PUBLIC_*` vars at

@@ -68,6 +68,20 @@ templatesRouter.get(
 
     if (error) throw error;
 
+    if (!data || data.length === 0) {
+      let tpls = demoData.templates.data;
+      if (q.status) tpls = tpls.filter((t) => t.status === q.status);
+      if (q.category) tpls = tpls.filter((t) => t.category === q.category);
+      if (q.search) tpls = tpls.filter((t) => t.name.toLowerCase().includes(q.search!.toLowerCase()));
+      return res.json({
+        data: tpls,
+        page: q.page,
+        pageSize: q.pageSize,
+        total: tpls.length,
+        totalPages: 1,
+      });
+    }
+
     res.json({
       data: data ?? [],
       page: q.page,

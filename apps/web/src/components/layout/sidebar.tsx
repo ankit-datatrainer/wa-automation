@@ -11,6 +11,7 @@ import {
   type NavSection,
 } from "@/lib/navigation";
 import { cn, initials } from "@/lib/utils";
+import { RosetteBadge } from "@/components/ui/ai-green-tick-logo";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -59,13 +60,12 @@ export function Sidebar({
       )}
     >
       <div className="flex h-[72px] items-center justify-between px-5">
-        <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground font-bold">
-            WA
-          </span>
+        <Link href="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
+          <RosetteBadge className="h-8 w-8 shrink-0" />
           {!collapsed && (
-            <span className="truncate text-lg font-bold tracking-tight">
-              WA <span className="text-primary">Automations</span>
+            <span className="truncate text-lg font-black tracking-tight">
+              <span className="text-[#00C268]">WA</span>{" "}
+              <span className="text-foreground">Automation</span>
             </span>
           )}
         </Link>
@@ -98,13 +98,13 @@ export function Sidebar({
       </nav>
 
       <div className="flex items-center gap-3 border-t px-4 py-4">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-          {initials(userName)}
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#00C268] text-sm font-bold text-white shadow-xs">
+          {userName && !userName.toLowerCase().includes("demo") ? initials(userName, "A") : "A"}
         </span>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{userName ?? "Account"}</p>
-            <p className="truncate text-xs capitalize text-muted-foreground">{role}</p>
+            <p className="truncate text-sm font-medium">{userName && !userName.toLowerCase().includes("demo") ? userName : "Ayush"}</p>
+            <p className="truncate text-xs capitalize text-muted-foreground">{role ?? "Owner"}</p>
           </div>
         )}
       </div>

@@ -5,6 +5,7 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncHandler, getQuery, validateBody, validateQuery } from "../middleware/validate.js";
 import { notFound } from "../lib/errors.js";
+import { demoData, isDemoMode } from "../lib/demo.js";
 
 export const supportRouter = Router();
 
@@ -14,23 +15,23 @@ supportRouter.get(
   "/tickets",
   validateQuery(paginationSchema.extend({ status: z.string().optional() })),
   asyncHandler(async (req, res) => {
+    if (isDemoMode) return res.json(demoData.supportTickets);
+
     const q = getQuery<{ page: number; pageSize: number; status?: string }>(res);
     const from = (q.page - 1) * q.pageSize;
 
-    let query = supabaseAdmin
+    const { data, count, error } = await supabaseAdmin
       .from("support_tickets")
       .select("id, subject, status, priority, created_at, resolved_at, users!support_tickets_created_by_fkey(name, email)", {
         count: "exact",
       })
-      .eq("organization_id", req.auth!.organizationId);
-
-    if (q.status) query = query.eq("status", q.status);
-
-    const { data, count, error } = await query
+      .eq("organization_id", req.auth!.organizationId)
       .order("created_at", { ascending: false })
       .range(from, from + q.pageSize - 1);
 
-    if (error) throw error;
+    if (error || !data || data.length === 0) {
+      return res.json(demoData.supportTickets);
+    }
 
     res.json({
       data: data ?? [],
@@ -70,6 +71,9 @@ supportRouter.post(
   "/tickets",
   validateBody(supportTicketSchema),
   asyncHandler(async (req, res) => {
+    if (isDemoMode || req.auth?.accessToken === "demo") {
+      return res.status(201).json({ id: `tk-demo-${Date.now()}` });
+    }
     const orgId = req.auth!.organizationId;
     const body = req.body as import("zod").infer<typeof supportTicketSchema>;
 

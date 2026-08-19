@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="waGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E67A" />
+      <stop offset="50%" stop-color="#00C268" />
+      <stop offset="100%" stop-color="#009A52" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#00C268" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect x="8" y="8" width="112" height="112" rx="30" ry="30" fill="url(#waGrad)" filter="url(#shadow)" />
+
+  <!-- Inner Subtle Border -->
+  <rect x="9.5" y="9.5" width="109" height="109" rx="28.5" ry="28.5" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.3" />
+
+  <!-- WhatsApp Speech Bubble Base -->
+  <path
+    d="M64 26 C43.01 26 26 43.01 26 64 C26 71.2 28.01 77.95 31.5 83.7 L27 101 L44.8 96.6 C50.35 99.98 56.9 102 64 102 C84.99 102 102 84.99 102 64 C102 43.01 84.99 26 64 26 Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Green Inner Bubble Detail -->
+  <path
+    d="M64 33 C46.88 33 33 46.88 33 64 C33 69.88 34.64 75.4 37.5 80.1 L33.8 94.2 L48.3 90.6 C52.84 93.36 58.2 95 64 95 C81.12 95 95 81.12 95 64 C95 46.88 81.12 33 64 33 Z"
+    fill="url(#waGrad)"
+  />
+
+  <!-- Bold White Verified Automation Checkmark -->
+  <path
+    d="M51 63.5 L60 72.5 L77.5 53"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="7.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Top Right Accent Sparkle -->
+  <circle cx="98" cy="28" r="4.5" fill="#FFD233" />
+</svg>
