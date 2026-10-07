@@ -1,747 +1,1104 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpDown,
-  Check,
-  Edit3,
-  ExternalLink,
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Copy,
   Eye,
+  FileEdit,
   FileText,
-  MessageCircle,
-  MessageSquare,
+  Info,
+  LayoutGrid,
+  LibraryBig,
+  List,
   MoreHorizontal,
-  MoreVertical,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   Send,
   Trash2,
   X,
+  XCircle,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api-client";
+import { PageHeader } from "@/components/layout/page-header";
+import { Badge, statusTone } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input, Select } from "@/components/ui/input";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
+import { Table, TBody, TD, TH, THead } from "@/components/ui/table";
+import {
+  AnimatedNumber,
+  AnimatePresence,
+  motion,
+  SegmentedTabs,
+  Spotlight,
+  Stagger,
+  StaggerItem,
+} from "@/components/motion";
+import { api, ApiClientError } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { Modal, useRetained } from "./modal";
 import { TemplateBuilder } from "./template-builder";
+import { extractVariables, MessageBubble, TemplatePreview } from "./template-preview";
+import {
+  CATEGORY_META,
+  formatDate,
+  headerFormatOf,
+  isEditable,
+  languageLabel,
+  samplesFrom,
+  STATUS_LABEL,
+  toDraft,
+  type BuilderInitial,
+  type TemplateCategory,
+  type TemplateRecord,
+  type TemplatesResponse,
+} from "./template-model";
 
-interface TemplateItem {
-  id: string;
-  name: string;
-  category: "marketing" | "utility" | "authentication";
-  status: "approved" | "pending" | "rejected" | "draft";
-  language: string;
-  languageLabel?: string;
-  created_at: string;
-  updated_at?: string;
-  components: {
-    header?: { type: "IMAGE" | "TEXT" | "VIDEO" | "DOCUMENT"; text?: string };
-    body: { text: string };
-    footer?: { text?: string };
-    buttons?: { type: string; text: string }[];
-  };
+type CategoryFilter = "all" | TemplateCategory;
+type StatusFilter = "all" | "approved" | "pending" | "draft" | "rejected" | "paused" | "disabled";
+type SortKey = "newest" | "oldest" | "name_asc" | "name_desc" | "status";
+
+const ease = [0.22, 1, 0.36, 1] as const;
+
+function fetchTemplates(categoryFilter: CategoryFilter, statusFilter: StatusFilter) {
+  return api.get<TemplatesResponse>("/templates", {
+    category: categoryFilter !== "all" ? categoryFilter : undefined,
+    status: statusFilter !== "all" ? statusFilter : undefined,
+    pageSize: 100,
+  });
 }
 
-const DEFAULT_TEMPLATES: TemplateItem[] = [
-  {
-    id: "tpl1",
-    name: "peculiex_finvoq",
-    category: "marketing",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-19T10:00:00.000Z",
-    components: {
-      header: { type: "IMAGE" },
-      body: { text: "Hi {{1}}, welcome to Peculiex Finvoq! Explore our automated invoice and billing solution." },
-      buttons: [{ type: "URL", text: "Get Started" }],
-    },
-  },
-  {
-    id: "tpl2",
-    name: "website_development",
-    category: "marketing",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-18T12:00:00.000Z",
-    components: {
-      header: { type: "IMAGE" },
-      body: { text: "Hi {{1}}, transform your brand with custom website design and web applications." },
-      buttons: [{ type: "URL", text: "View Portfolio" }],
-    },
-  },
-  {
-    id: "tpl3",
-    name: "leads_whatsapp",
-    category: "marketing",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-11T14:00:00.000Z",
-    components: {
-      header: { type: "IMAGE" },
-      body: { text: "Hi {{1}}, thank you for reaching out through WhatsApp! Our consultant will connect with you shortly." },
-      buttons: [{ type: "QUICK_REPLY", text: "Talk to Agent" }],
-    },
-  },
-  {
-    id: "tpl4",
-    name: "peculiex_1st",
-    category: "marketing",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-06T15:00:00.000Z",
-    components: {
-      header: { type: "IMAGE" },
-      body: { text: "Hello {{1}}, discover innovative technology solutions tailored for your business growth." },
-      buttons: [{ type: "URL", text: "Visit Website" }],
-    },
-  },
-  {
-    id: "tpl5",
-    name: "msg2",
-    category: "utility",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-06T11:00:00.000Z",
-    components: {
-      body: { text: "Hi {{1}}, your transaction request #{{2}} has been successfully processed." },
-      buttons: [{ type: "QUICK_REPLY", text: "View Details" }],
-    },
-  },
-  {
-    id: "tpl6",
-    name: "msg",
-    category: "utility",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-06T09:00:00.000Z",
-    components: {
-      body: { text: "Hi {{1}}, your account verification code is {{2}}. Valid for 10 minutes." },
-    },
-  },
-  {
-    id: "tpl7",
-    name: "test",
-    category: "utility",
-    status: "approved",
-    language: "en",
-    languageLabel: "English",
-    created_at: "2026-08-06T08:00:00.000Z",
-    components: {
-      body: { text: "This is a test utility notification message for account {{1}}." },
-    },
-  },
-];
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof ApiClientError ? error.message : fallback;
 
 export default function YourTemplatesPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sortField, setSortField] = useState<"name" | "category" | "status" | "language" | "created_at">("created_at");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<SortKey>("newest");
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [selected, setSelected] = useState<string[]>([]);
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [previewTemplate, setPreviewTemplate] = useState<TemplateItem | null>(null);
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [builder, setBuilder] = useState<{ open: boolean; initial: BuilderInitial | null }>({
+    open: false,
+    initial: null,
+  });
+  const [previewTemplate, setPreviewTemplate] = useState<TemplateRecord | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TemplateRecord[] | null>(null);
+  const retainedPreview = useRetained(previewTemplate);
+  const shownDelete = useRetained(pendingDelete);
+
+  // Remember the preferred layout per viewer.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("wa.templates.view");
+      if (saved === "grid" || saved === "list") setView(saved);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  const changeView = (next: "grid" | "list") => {
+    setView(next);
+    try {
+      localStorage.setItem("wa.templates.view", next);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const templatesQuery = useQuery({
     queryKey: ["templates", { categoryFilter, statusFilter }],
-    queryFn: () =>
-      api.get<{ data: TemplateItem[]; total: number }>("/templates", {
-        category: categoryFilter !== "all" ? categoryFilter : undefined,
-        status: statusFilter !== "all" ? statusFilter : undefined,
-      }),
+    queryFn: () => fetchTemplates(categoryFilter, statusFilter),
+    placeholderData: keepPreviousData,
   });
 
-  const rawTemplates: TemplateItem[] = useMemo(() => {
-    const apiData = templatesQuery.data?.data;
-    if (apiData && apiData.length >= 7) return apiData;
-    return DEFAULT_TEMPLATES;
-  }, [templatesQuery.data]);
+  // Unfiltered list (shares its cache entry with the main query when no filter is set) for KPIs.
+  const allQuery = useQuery({
+    queryKey: ["templates", { categoryFilter: "all", statusFilter: "all" }],
+    queryFn: () => fetchTemplates("all", "all"),
+  });
 
-  // Real-time filtering and sorting
-  const filteredTemplates = useMemo(() => {
-    let list = [...rawTemplates];
+  const allTemplates = allQuery.data?.data ?? [];
 
-    if (search.trim()) {
-      const q = search.toLowerCase();
+  // Re-read the previewed template from the latest data so its status and actions
+  // stay current after a submit or sync (the stored row is only a snapshot).
+  const shownPreview = useMemo(() => {
+    if (!retainedPreview) return null;
+    const id = retainedPreview.id;
+    return (
+      templatesQuery.data?.data.find((t) => t.id === id) ??
+      allQuery.data?.data.find((t) => t.id === id) ??
+      retainedPreview
+    );
+  }, [retainedPreview, templatesQuery.data, allQuery.data]);
+
+  const stats = useMemo(() => {
+    const count = (status: string) => allTemplates.filter((t) => t.status === status).length;
+    return {
+      total: allQuery.data?.total ?? allTemplates.length,
+      approved: count("approved"),
+      pending: count("pending"),
+      draft: count("draft"),
+      rejected: count("rejected"),
+    };
+  }, [allTemplates, allQuery.data?.total]);
+
+  const templates = useMemo(() => {
+    let list = [...(templatesQuery.data?.data ?? [])];
+    const q = search.trim().toLowerCase();
+    if (q) {
       list = list.filter(
         (t) =>
           t.name.toLowerCase().includes(q) ||
           t.components?.body?.text?.toLowerCase().includes(q) ||
-          t.category.toLowerCase().includes(q)
+          t.category.toLowerCase().includes(q),
       );
     }
-
-    if (categoryFilter !== "all") {
-      list = list.filter((t) => t.category === categoryFilter);
-    }
-
-    if (statusFilter !== "all") {
-      list = list.filter((t) => t.status === statusFilter);
-    }
-
     list.sort((a, b) => {
-      let valA = a[sortField] || "";
-      let valB = b[sortField] || "";
-      if (sortField === "created_at") {
-        return sortOrder === "asc"
-          ? new Date(valA).getTime() - new Date(valB).getTime()
-          : new Date(valB).getTime() - new Date(valA).getTime();
+      switch (sort) {
+        case "oldest":
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "name_asc":
+          return a.name.localeCompare(b.name);
+        case "name_desc":
+          return b.name.localeCompare(a.name);
+        case "status":
+          return a.status.localeCompare(b.status) || a.name.localeCompare(b.name);
+        default:
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       }
-      return sortOrder === "asc"
-        ? String(valA).localeCompare(String(valB))
-        : String(valB).localeCompare(String(valA));
     });
-
     return list;
-  }, [rawTemplates, search, categoryFilter, statusFilter, sortField, sortOrder]);
+  }, [templatesQuery.data, search, sort]);
 
-  const allSelected = filteredTemplates.length > 0 && selected.length === filteredTemplates.length;
+  // Drop selections that are no longer visible.
+  useEffect(() => {
+    setSelected((current) => current.filter((id) => templates.some((t) => t.id === id)));
+  }, [templates]);
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelected(filteredTemplates.map((t) => t.id));
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const handleSelectRow = (id: string) => {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const toggleSort = (field: typeof sortField) => {
-    if (sortField === field) {
-      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortOrder("asc");
-    }
-  };
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["templates"] });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/templates/${id}`),
-    onSuccess: () => {
-      toast.success("Template deleted");
-      void queryClient.invalidateQueries({ queryKey: ["templates"] });
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => api.delete(`/templates/${id}`)));
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      return { deleted: ids.length - failed.length, failed };
     },
-    onError: () => {
-      toast.success("Template deleted");
+    onSuccess: ({ deleted, failed }) => {
+      if (deleted > 0) toast.success(deleted === 1 ? "Template deleted" : `${deleted} templates deleted`);
+      if (failed.length > 0) toast.error(errorMessage(failed[0]!.reason, "Some templates could not be deleted"));
+      setSelected([]);
+      setPendingDelete(null);
+      setPreviewTemplate(null);
+      void invalidate();
     },
+    onError: (error) => toast.error(errorMessage(error, "Could not delete the template")),
   });
 
-  // Render {{1}} variable highlights
-  const renderHighlightedBody = (text: string) => {
-    const parts = text.split(/(\{\{\d+\}\})/g);
-    return parts.map((part, index) => {
-      if (/^\{\{\d+\}\}$/.test(part)) {
-        return (
-          <span
-            key={index}
-            className="inline-block rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-blue-600 border border-blue-200/60 mx-0.5"
-          >
-            {part}
-          </span>
-        );
-      }
-      return part;
+  const submitMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ metaTemplateId: string; status: string }>(`/templates/${id}/submit`),
+    onSuccess: () => {
+      toast.success("Submitted to Meta for review");
+      void invalidate();
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not submit the template")),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.post<{ synced: number; remoteTotal: number }>("/templates/sync"),
+    onSuccess: (result) => {
+      toast.success(
+        `Synced with Meta — ${result.synced} updated of ${result.remoteTotal} on your WhatsApp account`,
+      );
+      void invalidate();
+    },
+    onError: (error) => toast.error(errorMessage(error, "Could not sync with Meta")),
+  });
+
+  const openBuilder = (initial: BuilderInitial | null) => {
+    setPreviewTemplate(null);
+    setBuilder({ open: true, initial });
+  };
+  const editTemplate = (t: TemplateRecord) =>
+    openBuilder({ id: t.id, name: t.name, language: t.language, category: t.category, components: t.components });
+  const duplicateTemplate = (t: TemplateRecord) =>
+    openBuilder({
+      name: `${t.name}_copy`.slice(0, 512),
+      language: t.language,
+      category: t.category,
+      components: t.components,
     });
+
+  const actions: TemplateActions = {
+    preview: setPreviewTemplate,
+    edit: editTemplate,
+    duplicate: duplicateTemplate,
+    submit: (t) => submitMutation.mutate(t.id),
+    remove: (t) => setPendingDelete([t]),
+    submittingId: submitMutation.isPending ? submitMutation.variables : undefined,
   };
 
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+  const filtersActive = search.trim() !== "" || categoryFilter !== "all" || statusFilter !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setCategoryFilter("all");
+    setStatusFilter("all");
   };
+
+  const statTiles: { key: StatusFilter; label: string; value: number; icon: LucideIcon; tint: string }[] = [
+    { key: "all", label: "All templates", value: stats.total, icon: FileText, tint: "bg-brand-gradient text-white shadow-glow" },
+    { key: "approved", label: "Approved", value: stats.approved, icon: CheckCircle2, tint: "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200" },
+    { key: "pending", label: "In review", value: stats.pending, icon: Clock3, tint: "bg-amber-50 text-amber-600 ring-1 ring-amber-200" },
+    { key: "draft", label: "Drafts", value: stats.draft, icon: FileEdit, tint: "bg-brand-50 text-brand-600 ring-1 ring-brand-200" },
+    { key: "rejected", label: "Rejected", value: stats.rejected, icon: XCircle, tint: "bg-rose-50 text-rose-600 ring-1 ring-rose-200" },
+  ];
+
+  const allVisibleSelected = templates.length > 0 && selected.length === templates.length;
+  const isLoading = templatesQuery.isLoading;
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto pb-16 font-poppins space-y-6">
-      {/* ========================================================= */}
-      {/* 1. Breadcrumb Bar */}
-      {/* ========================================================= */}
-      <div className="flex items-center gap-2 text-xs text-gray-500 font-medium px-1">
-        <Link href="/dashboard" className="hover:text-gray-800 transition-colors">
-          🏠
-        </Link>
-        <span className="text-gray-300">&gt;</span>
-        <Link href="/campaigns" className="hover:text-gray-800 transition-colors">
-          Campaigns
-        </Link>
-        <span className="text-gray-300">&gt;</span>
-        <span className="text-gray-800 font-semibold">Your Templates</span>
-      </div>
+    <div className="pb-16">
+      <PageHeader
+        title="Your Templates"
+        description="Create, review and submit WhatsApp message templates for Meta approval."
+        actions={
+          <>
+            <Link href="/campaigns/template-library" className={buttonVariants({ variant: "outline" })}>
+              <LibraryBig size={16} />
+              <span className="hidden sm:inline">Browse library</span>
+              <span className="sm:hidden">Library</span>
+            </Link>
+            <Button
+              variant="outline"
+              onClick={() => syncMutation.mutate()}
+              loading={syncMutation.isPending}
+              title="Pull the latest approval statuses from Meta"
+            >
+              {!syncMutation.isPending && <RefreshCw size={16} />}
+              Sync with Meta
+            </Button>
+            <Button onClick={() => openBuilder(null)}>
+              <Plus size={16} strokeWidth={2.5} />
+              New template
+            </Button>
+          </>
+        }
+      />
 
-      {/* ========================================================= */}
-      {/* 2. Top Header Card */}
-      {/* ========================================================= */}
-      <div className="rounded-3xl border border-gray-100 bg-white p-6 sm:p-7 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#00C268] text-white flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0 mt-0.5">
-            <MessageSquare size={22} className="fill-white/20 stroke-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">
-              Your Templates
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 max-w-3xl leading-relaxed">
-              Select or create your template and submit it for WhatsApp approval
-            </p>
-          </div>
-        </div>
+      {/* KPI tiles — click to filter by status */}
+      <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 lg:gap-4">
+        {statTiles.map((tile) => {
+          const active = statusFilter === tile.key;
+          const Icon = tile.icon;
+          return (
+            <StaggerItem key={tile.key} className={tile.key === "all" ? "col-span-2 sm:col-span-1" : undefined}>
+              <motion.button
+                type="button"
+                onClick={() => setStatusFilter(tile.key)}
+                aria-pressed={active}
+                whileHover={{ y: -3 }}
+                transition={{ type: "spring", stiffness: 320, damping: 24 }}
+                className={cn(
+                  "group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border bg-white p-4 text-left shadow-soft transition-shadow duration-300 hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  active ? "border-brand-300 ring-2 ring-brand-200" : "border-border/80",
+                )}
+              >
+                <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl", tile.tint)}>
+                  <Icon size={20} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-display text-2xl font-bold leading-none tracking-tight">
+                    {allQuery.isLoading ? (
+                      <span className="inline-block h-6 w-10 animate-pulse rounded-md bg-muted" />
+                    ) : (
+                      <AnimatedNumber value={tile.value} />
+                    )}
+                  </span>
+                  <span className="mt-1 block truncate text-xs font-medium text-muted-foreground">{tile.label}</span>
+                </span>
+                {active && (
+                  <motion.span
+                    layoutId="template-stat-active"
+                    className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-brand-gradient"
+                  />
+                )}
+              </motion.button>
+            </StaggerItem>
+          );
+        })}
+      </Stagger>
 
-        {/* Right Buttons */}
-        <div className="flex items-center gap-3">
-          <span className="rounded-xl bg-[#E8F8F0] px-4 py-2 text-xs font-bold text-[#00C268] shadow-2xs">
-            {filteredTemplates.length} Templates
-          </span>
-
-          <button
-            type="button"
-            onClick={() => setBuilderOpen(true)}
-            className="flex h-10 items-center gap-2 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] active:scale-95 transition-all shrink-0"
+      {/* Guidelines */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease, delay: 0.15 }}
+        className="mt-5 flex items-start gap-3 rounded-2xl border border-brand-100 bg-brand-50/50 px-4 py-3 text-sm text-brand-900/80"
+      >
+        <Info size={17} className="mt-0.5 shrink-0 text-brand-600" />
+        <p>
+          Templates must follow{" "}
+          <a
+            href="https://developers.facebook.com/docs/whatsapp/message-templates/guidelines"
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold text-brand-700 underline-offset-4 hover:underline"
           >
-            <Plus size={16} strokeWidth={2.5} />
-            <span>New Template Message</span>
-          </button>
-        </div>
-      </div>
+            WhatsApp&apos;s guidelines
+          </a>{" "}
+          and are reviewed by Meta before they can be used in campaigns. Only drafts and rejected templates can be edited.
+        </p>
+      </motion.div>
 
-      {/* ========================================================= */}
-      {/* 3. Guidelines Notice Box */}
-      {/* ========================================================= */}
-      <div className="rounded-2xl border border-gray-100 bg-gray-50/70 px-5 py-3.5 text-xs text-gray-500 font-medium leading-relaxed">
-        All templates must adhere to{" "}
-        <a
-          href="https://developers.facebook.com/docs/whatsapp/message-templates/guidelines"
-          target="_blank"
-          rel="noreferrer"
-          className="text-[#00C268] font-bold hover:underline"
-        >
-          WhatsApp&apos;s guidelines
-        </a>
-        . Templates are reviewed and approved by WhatsApp before they can be used.
-      </div>
-
-      {/* ========================================================= */}
-      {/* 4. Controls & Filters Bar */}
-      {/* ========================================================= */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        {/* Search and Filters */}
-        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-          {/* Search Box */}
-          <div className="relative flex-1 max-w-xs">
-            <Search
-              size={15}
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-            <input
-              type="text"
-              placeholder="Search templates..."
+      {/* Toolbar */}
+      <Card className="mt-5 p-3 sm:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="relative flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="Search templates"
+              placeholder="Search by name, message or category…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-10 w-full rounded-xl border border-gray-200/80 bg-white pl-9 pr-4 text-xs text-gray-800 placeholder:text-gray-400 shadow-2xs outline-none focus:border-[#00C268] focus:ring-2 focus:ring-[#00C268]/20 transition-all"
+              className="pl-10 pr-10"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-brand-50 hover:text-primary"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="scrollbar-none -mx-1 overflow-x-auto px-1">
+            <SegmentedTabs
+              layoutId="template-category"
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              tabs={[
+                { value: "all", label: "All" },
+                { value: "marketing", label: "Marketing" },
+                { value: "utility", label: "Utility" },
+                { value: "authentication", label: "Authentication" },
+              ]}
             />
           </div>
 
-          {/* Category Dropdown */}
-          <div className="flex items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-2xs">
-            <span className="text-gray-400 font-normal">Category:</span>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer pr-1"
-            >
-              <option value="all">All Categories</option>
-              <option value="marketing">Marketing</option>
-              <option value="utility">Utility</option>
-              <option value="authentication">Authentication</option>
-            </select>
-          </div>
-
-          {/* Status Dropdown */}
-          <div className="flex items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-2xs">
-            <span className="text-gray-400 font-normal">Status:</span>
-            <select
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              aria-label="Filter by status"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer pr-1"
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="h-10 w-[150px] flex-1 sm:flex-none"
             >
-              <option value="all">All Statuses</option>
+              <option value="all">All statuses</option>
               <option value="approved">Approved</option>
-              <option value="pending">Pending</option>
-              <option value="rejected">Rejected</option>
+              <option value="pending">In review</option>
               <option value="draft">Draft</option>
-            </select>
+              <option value="rejected">Rejected</option>
+              <option value="paused">Paused</option>
+              <option value="disabled">Disabled</option>
+            </Select>
+            <Select
+              aria-label="Sort templates"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="h-10 w-[150px] flex-1 sm:flex-none"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name_asc">Name A–Z</option>
+              <option value="name_desc">Name Z–A</option>
+              <option value="status">Status</option>
+            </Select>
+            <SegmentedTabs
+              layoutId="template-view"
+              value={view}
+              onChange={changeView}
+              tabs={[
+                { value: "grid", label: <LayoutGrid size={16} aria-label="Grid view" /> },
+                { value: "list", label: <List size={16} aria-label="List view" /> },
+              ]}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Refresh templates"
+              onClick={() => void templatesQuery.refetch()}
+            >
+              <RefreshCw size={16} className={cn(templatesQuery.isFetching && "animate-spin text-primary")} />
+            </Button>
           </div>
         </div>
 
-        {/* Refresh Button */}
-        <button
-          type="button"
-          onClick={() => void templatesQuery.refetch()}
-          className="flex h-10 items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-4 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition-colors"
-        >
-          <RefreshCw
-            size={14}
-            className={templatesQuery.isFetching ? "animate-spin text-[#00C268]" : "text-gray-500"}
-          />
-          <span>Refresh</span>
-        </button>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 5. Templates Table Card */}
-      {/* ========================================================= */}
-      <div className="rounded-3xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-bold uppercase tracking-wider text-gray-500">
-                <th className="w-12 px-5 py-4">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={handleSelectAll}
-                    aria-label="Select all"
-                    className="h-4 w-4 rounded border-gray-300 text-[#00C268] focus:ring-[#00C268]/30 cursor-pointer"
-                  />
-                </th>
-                <th
-                  onClick={() => toggleSort("name")}
-                  className="px-4 py-4 cursor-pointer hover:text-gray-800 select-none"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>TEMPLATE NAME</span>
-                    <ArrowUpDown size={12} className="text-gray-400" />
-                  </div>
-                </th>
-                <th
-                  onClick={() => toggleSort("category")}
-                  className="px-4 py-4 cursor-pointer hover:text-gray-800 select-none"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>CATEGORY</span>
-                    <ArrowUpDown size={12} className="text-gray-400" />
-                  </div>
-                </th>
-                <th
-                  onClick={() => toggleSort("status")}
-                  className="px-4 py-4 cursor-pointer hover:text-gray-800 select-none"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>STATUS</span>
-                    <ArrowUpDown size={12} className="text-gray-400" />
-                  </div>
-                </th>
-                <th
-                  onClick={() => toggleSort("language")}
-                  className="px-4 py-4 cursor-pointer hover:text-gray-800 select-none"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>LANGUAGE</span>
-                    <ArrowUpDown size={12} className="text-gray-400" />
-                  </div>
-                </th>
-                <th
-                  onClick={() => toggleSort("created_at")}
-                  className="px-4 py-4 cursor-pointer hover:text-gray-800 select-none"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>LAST UPDATED</span>
-                    <ArrowUpDown size={12} className="text-gray-400" />
-                  </div>
-                </th>
-                <th className="px-4 py-4 text-right">ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-xs">
-              {filteredTemplates.map((template) => {
-                const isSelected = selected.includes(template.id);
-                const isMarketing = template.category === "marketing";
-
-                return (
-                  <tr
-                    key={template.id}
-                    className={`hover:bg-gray-50/60 transition-colors ${
-                      isSelected ? "bg-emerald-50/40" : ""
-                    }`}
+        <AnimatePresence initial={false}>
+          {(filtersActive || templatesQuery.data) && (
+            <motion.div
+              key="result-summary"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                <span>
+                  Showing <span className="font-semibold text-foreground">{templates.length}</span>{" "}
+                  {templates.length === 1 ? "template" : "templates"}
+                </span>
+                {filtersActive && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 font-semibold text-brand-700 transition hover:bg-brand-100"
                   >
-                    {/* Checkbox */}
-                    <td className="px-5 py-4">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleSelectRow(template.id)}
-                        aria-label={`Select ${template.name}`}
-                        className="h-4 w-4 rounded border-gray-300 text-[#00C268] focus:ring-[#00C268]/30 cursor-pointer"
-                      />
-                    </td>
+                    <X size={12} />
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </Card>
 
-                    {/* Template Name */}
-                    <td className="px-4 py-4 font-mono font-medium text-gray-900">
-                      {template.name}
-                    </td>
+      {/* Bulk actions */}
+      <AnimatePresence>
+        {view === "list" && selected.length > 0 && (
+          <motion.div
+            key="bulk-actions"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease }}
+            className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-200 bg-brand-50/70 px-4 py-2.5"
+          >
+            <p className="text-sm font-semibold text-brand-800">{selected.length} selected</p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setSelected([])}>
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setPendingDelete(templates.filter((t) => selected.includes(t.id)))}
+              >
+                <Trash2 size={14} />
+                Delete selected
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-                    {/* Category Pill */}
-                    <td className="px-4 py-4">
-                      <span
-                        className={`rounded-md px-2.5 py-0.5 text-[10.5px] font-extrabold uppercase tracking-wide ${
-                          isMarketing
-                            ? "bg-blue-50 text-blue-700"
-                            : "bg-purple-50 text-purple-700"
-                        }`}
-                      >
-                        {template.category}
-                      </span>
-                    </td>
-
-                    {/* Status Pill */}
-                    <td className="px-4 py-4">
-                      <span className="rounded-md bg-emerald-50 px-2.5 py-0.5 text-[10.5px] font-extrabold text-[#00C268] uppercase tracking-wide">
-                        {template.status}
-                      </span>
-                    </td>
-
-                    {/* Language */}
-                    <td className="px-4 py-4 text-gray-700">
-                      <p className="font-medium">{template.languageLabel || "English"}</p>
-                      <p className="text-[10px] text-gray-400 font-mono">{template.language}</p>
-                    </td>
-
-                    {/* Last Updated */}
-                    <td className="px-4 py-4 text-gray-700 whitespace-nowrap">
-                      <p className="font-medium">{formatDate(template.created_at)}</p>
-                      <p className="text-[10px] text-gray-400">
-                        Created: {formatDate(template.created_at)}
-                      </p>
-                    </td>
-
-                    {/* Actions Column */}
-                    <td className="px-4 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1 relative">
-                        {/* Eye icon: View Preview Modal */}
+      {/* Content */}
+      <div className="mt-5">
+        {isLoading ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i} className="space-y-4 p-5">
+                <div className="flex gap-2">
+                  <Skeleton className="h-5 w-20 rounded-full" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+                <Skeleton className="h-5 w-2/3" />
+                <Skeleton className="h-28 w-full" />
+                <Skeleton className="h-9 w-full" />
+              </Card>
+            ))}
+          </div>
+        ) : templatesQuery.isError ? (
+          <ErrorState
+            message={errorMessage(templatesQuery.error, "We couldn't load your templates.")}
+            onRetry={() => void templatesQuery.refetch()}
+          />
+        ) : templates.length === 0 ? (
+          <Card>
+            {filtersActive ? (
+              <EmptyState
+                icon={Search}
+                title="No templates match"
+                description="Try a different search, or clear the filters to see everything."
+                action={
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={FileText}
+                title="Create your first template"
+                description="Design a message with a live WhatsApp preview, or start from a proven template in the library."
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button onClick={() => openBuilder(null)}>
+                      <Plus size={16} />
+                      New template
+                    </Button>
+                    <Link href="/campaigns/template-library" className={buttonVariants({ variant: "outline" })}>
+                      <LibraryBig size={16} />
+                      Browse library
+                    </Link>
+                  </div>
+                }
+              />
+            )}
+          </Card>
+        ) : view === "grid" ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {templates.map((template, index) => (
+              <motion.div
+                key={template.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease, delay: Math.min(index, 12) * 0.04 }}
+              >
+                <TemplateCard template={template} actions={actions} />
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <Card className="overflow-hidden">
+            <Table>
+              <THead>
+                <tr>
+                  <TH className="w-12">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={(e) => setSelected(e.target.checked ? templates.map((t) => t.id) : [])}
+                      aria-label="Select all templates"
+                      className="h-4 w-4 cursor-pointer rounded border-border accent-brand-600"
+                    />
+                  </TH>
+                  <TH>Template</TH>
+                  <TH>Category</TH>
+                  <TH>Status</TH>
+                  <TH className="hidden md:table-cell">Language</TH>
+                  <TH className="hidden lg:table-cell">Created</TH>
+                  <TH className="text-right">Actions</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {templates.map((template, index) => {
+                  const isSelected = selected.includes(template.id);
+                  return (
+                    <motion.tr
+                      key={template.id}
+                      initial={index < 20 ? { opacity: 0, y: 6 } : false}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, ease, delay: Math.min(index, 20) * 0.025 }}
+                      className={cn(
+                        "transition-colors duration-150 hover:bg-brand-50/50",
+                        isSelected && "bg-brand-50/60",
+                      )}
+                    >
+                      <TD>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() =>
+                            setSelected((current) =>
+                              current.includes(template.id)
+                                ? current.filter((id) => id !== template.id)
+                                : [...current, template.id],
+                            )
+                          }
+                          aria-label={`Select ${template.name}`}
+                          className="h-4 w-4 cursor-pointer rounded border-border accent-brand-600"
+                        />
+                      </TD>
+                      <TD className="max-w-[320px]">
                         <button
                           type="button"
                           onClick={() => setPreviewTemplate(template)}
-                          aria-label="View template preview"
-                          title="View Template"
-                          className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:text-[#00C268] hover:bg-emerald-50 transition-colors"
+                          className="block max-w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         >
-                          <Eye size={15} />
+                          <span className="block truncate font-mono text-[13px] font-semibold text-foreground hover:text-primary">
+                            {template.name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {template.components?.body?.text}
+                          </span>
                         </button>
-
-                        {/* More Actions Menu */}
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setActiveMenuId((current) =>
-                                current === template.id ? null : template.id
-                              )
-                            }
-                            aria-label="More options"
-                            className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                      </TD>
+                      <TD>
+                        <CategoryBadge category={template.category} />
+                      </TD>
+                      <TD>
+                        <StatusBadge status={template.status} />
+                      </TD>
+                      <TD className="hidden whitespace-nowrap text-sm md:table-cell">
+                        {languageLabel(template.language)}
+                        <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">{template.language}</span>
+                      </TD>
+                      <TD className="hidden whitespace-nowrap text-sm text-muted-foreground lg:table-cell">
+                        {formatDate(template.created_at)}
+                      </TD>
+                      <TD className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Preview ${template.name}`}
+                            onClick={() => setPreviewTemplate(template)}
                           >
-                            <MoreHorizontal size={16} />
-                          </button>
-
-                          {activeMenuId === template.id && (
-                            <div className="absolute right-0 top-full mt-1 w-44 rounded-2xl border border-gray-100 bg-white p-2 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveMenuId(null);
-                                  setPreviewTemplate(template);
-                                }}
-                                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                              >
-                                <Eye size={14} className="text-[#00C268]" />
-                                <span>Preview</span>
-                              </button>
-
-                              <Link
-                                href={`/campaigns/new?template=${template.name}`}
-                                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-[#00C268] hover:bg-emerald-50 transition-colors"
-                              >
-                                <Send size={14} />
-                                <span>Send Campaign</span>
-                              </Link>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveMenuId(null);
-                                  deleteMutation.mutate(template.id);
-                                }}
-                                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
-                              >
-                                <Trash2 size={14} />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          )}
+                            <Eye size={16} />
+                          </Button>
+                          <ActionMenu template={template} actions={actions} />
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </TD>
+                    </motion.tr>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </Card>
+        )}
       </div>
 
-      {/* ========================================================= */}
-      {/* 6. "View Template" Interactive Preview Modal */}
-      {/* ========================================================= */}
-      {previewTemplate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-3xl border border-gray-100 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto scrollbar-thin">
-            {/* Modal Topbar */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-              <h2 className="text-base font-bold text-gray-900">
-                Template Preview
-              </h2>
-              <button
-                type="button"
-                onClick={() => setPreviewTemplate(null)}
-                aria-label="Close"
-                className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
+      {/* Preview */}
+      <Modal
+        open={previewTemplate !== null}
+        onClose={() => setPreviewTemplate(null)}
+        title={shownPreview?.name ?? "Template preview"}
+        description="How this template appears on WhatsApp"
+        icon={<Eye size={18} />}
+        size="lg"
+        footer={shownPreview && <PreviewFooter template={shownPreview} actions={actions} onClose={() => setPreviewTemplate(null)} />}
+      >
+        {shownPreview && <PreviewBody template={shownPreview} />}
+      </Modal>
 
-            <div className="mt-5 space-y-5">
-              {/* Technical Name & Meta Badges Box */}
-              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs space-y-2">
-                <h3 className="font-mono text-sm font-bold text-gray-900">
-                  {previewTemplate.name}
-                </h3>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 uppercase">
-                    {previewTemplate.category}
-                  </span>
-                  <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 uppercase">
-                    {previewTemplate.status}
-                  </span>
-                  <span className="text-gray-400 font-medium text-[11px]">
-                    Language: {previewTemplate.language.toUpperCase()}
-                  </span>
-                </div>
-              </div>
+      {/* Delete confirmation */}
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => !deleteMutation.isPending && setPendingDelete(null)}
+        title={shownDelete && shownDelete.length > 1 ? `Delete ${shownDelete.length} templates?` : "Delete template?"}
+        icon={<Trash2 size={18} />}
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setPendingDelete(null)} disabled={deleteMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              loading={deleteMutation.isPending}
+              onClick={() => pendingDelete && deleteMutation.mutate(pendingDelete.map((t) => t.id))}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          {shownDelete?.length === 1 ? (
+            <>
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">{shownDelete[0]!.name}</code>{" "}
+              will be removed from your account
+            </>
+          ) : (
+            "These templates will be removed from your account"
+          )}
+          {" "}and, if submitted, from your WhatsApp Business account on Meta. This can&apos;t be undone.
+        </p>
+      </Modal>
 
-              {/* WhatsApp Phone Mockup Container */}
-              <div className="rounded-3xl border border-emerald-100/80 bg-emerald-50/30 p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="grid h-6 w-6 place-items-center rounded-full bg-[#00C268] text-white">
-                    <MessageCircle size={14} className="fill-current" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-900 leading-tight">
-                      WhatsApp Preview
-                    </h4>
-                    <p className="text-[10px] text-gray-400">
-                      How your message will appear
-                    </p>
-                  </div>
-                </div>
-
-                {/* WhatsApp Chat Bubble Card Mockup */}
-                <div className="w-full max-w-sm mx-auto rounded-2xl border border-gray-200/70 bg-white shadow-md overflow-hidden">
-                  {/* WhatsApp Topbar */}
-                  <div className="bg-[#00C268] px-4 py-2.5 flex items-center justify-between text-white">
-                    <div className="flex items-center gap-2">
-                      <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-[#00C268] font-bold text-[10px]">
-                        B
-                      </span>
-                      <div>
-                        <p className="font-bold text-xs leading-tight">Business Account</p>
-                        <p className="text-[9px] text-emerald-100">Template Message</p>
-                      </div>
-                    </div>
-                    <MoreVertical size={14} className="text-white/80" />
-                  </div>
-
-                  {/* Bubble Body */}
-                  <div className="p-4 space-y-3 bg-[#f8fafc]/50 text-xs">
-                    {/* Header Type */}
-                    {previewTemplate.components?.header?.type && (
-                      <div className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600">
-                        <span>🖼️</span>
-                        <span>{previewTemplate.components.header.type} Header</span>
-                      </div>
-                    )}
-
-                    {/* Body text */}
-                    <p className="text-gray-800 leading-relaxed">
-                      {renderHighlightedBody(previewTemplate.components?.body?.text || "")}
-                    </p>
-
-                    {/* Buttons Mock */}
-                    {previewTemplate.components?.buttons &&
-                      previewTemplate.components.buttons.map((btn, idx) => (
-                        <div key={idx} className="pt-2 border-t border-gray-100">
-                          <div className="flex items-center justify-center gap-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 py-2 font-bold text-xs shadow-2xs cursor-pointer transition-colors">
-                            <ExternalLink size={13} />
-                            <span>{btn.text}</span>
-                          </div>
-                        </div>
-                      ))}
-
-                    {/* WhatsApp Template watermark */}
-                    <div className="text-right text-[9px] text-gray-400 pt-1">
-                      WhatsApp Template
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex items-center gap-3 pt-2">
-                <Link
-                  href={`/campaigns/new?template=${previewTemplate.name}`}
-                  className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] transition-all"
-                >
-                  <Send size={15} />
-                  <span>Send Campaign</span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => setPreviewTemplate(null)}
-                  className="h-11 rounded-xl border border-gray-200 px-5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* 7. Template Builder Drawer */}
-      {/* ========================================================= */}
       <TemplateBuilder
-        open={builderOpen}
-        onClose={() => setBuilderOpen(false)}
+        open={builder.open}
+        initial={builder.initial}
+        onClose={() => setBuilder((b) => ({ ...b, open: false }))}
         onSaved={() => {
-          setBuilderOpen(false);
-          void queryClient.invalidateQueries({ queryKey: ["templates"] });
+          setBuilder({ open: false, initial: null });
+          void invalidate();
         }}
       />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+
+interface TemplateActions {
+  preview: (t: TemplateRecord) => void;
+  edit: (t: TemplateRecord) => void;
+  duplicate: (t: TemplateRecord) => void;
+  submit: (t: TemplateRecord) => void;
+  remove: (t: TemplateRecord) => void;
+  submittingId?: string;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge tone={statusTone(status)} className="whitespace-nowrap">
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          status === "approved" && "bg-emerald-500",
+          status === "pending" && "animate-pulse bg-amber-500",
+          (status === "rejected" || status === "disabled") && "bg-rose-500",
+          status === "paused" && "bg-amber-500",
+          status === "draft" && "bg-muted-foreground/60",
+        )}
+      />
+      {STATUS_LABEL[status] ?? status}
+    </Badge>
+  );
+}
+
+function CategoryBadge({ category }: { category: TemplateCategory }) {
+  const meta = CATEGORY_META[category];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
+        meta?.className ?? "bg-muted text-muted-foreground ring-border",
+      )}
+    >
+      {meta?.label ?? category}
+    </span>
+  );
+}
+
+function TemplateCard({ template, actions }: { template: TemplateRecord; actions: TemplateActions }) {
+  const draft = toDraft(template.components);
+  const variables = extractVariables(draft.body);
+  const samples = samplesFrom(template.components, variables);
+  const editable = isEditable(template.status);
+  const submitting = actions.submittingId === template.id;
+
+  return (
+    <Spotlight className="flex h-full flex-col rounded-2xl border border-border/80 bg-white shadow-soft transition-all duration-300 hover:-translate-y-1 hover:border-brand-200 hover:shadow-lift">
+      <div className="relative flex items-start justify-between gap-2 p-4 pb-3">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={template.status} />
+            <CategoryBadge category={template.category} />
+          </div>
+          <button
+            type="button"
+            onClick={() => actions.preview(template)}
+            className="block max-w-full truncate text-left font-mono text-sm font-semibold text-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            title={template.name}
+          >
+            {template.name}
+          </button>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {languageLabel(template.language)} · {formatDate(template.created_at)}
+          </p>
+        </div>
+        <ActionMenu template={template} actions={actions} />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => actions.preview(template)}
+        aria-label={`Preview ${template.name}`}
+        className="relative mx-4 h-44 overflow-hidden rounded-xl border border-brand-100/70 bg-[#f7f3fb] p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <div className="origin-top-left transition-transform duration-500 group-hover:scale-[1.02]">
+          <MessageBubble draft={draft} samples={samples} compact />
+        </div>
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#f7f3fb] to-transparent" />
+        <span className="absolute bottom-2 right-2 inline-flex translate-y-2 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-700 opacity-0 shadow-soft transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+          <Eye size={12} />
+          Preview
+        </span>
+      </button>
+
+      {template.status === "rejected" && template.rejection_reason && (
+        <p className="mx-4 mt-3 flex items-start gap-1.5 rounded-lg bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+          <AlertTriangle size={13} className="mt-px shrink-0" />
+          <span className="line-clamp-2">{template.rejection_reason}</span>
+        </p>
+      )}
+
+      <div className="mt-auto flex items-center gap-2 p-4 pt-3">
+        {template.status === "approved" ? (
+          <Link
+            href={`/campaigns/new?template=${encodeURIComponent(template.name)}`}
+            className={cn(buttonVariants({ size: "sm" }), "flex-1")}
+          >
+            <Send size={14} />
+            Use in campaign
+          </Link>
+        ) : editable ? (
+          <>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => actions.edit(template)}>
+              <Pencil size={14} />
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1"
+              loading={submitting}
+              disabled={Boolean(actions.submittingId)}
+              onClick={() => actions.submit(template)}
+            >
+              {!submitting && <Send size={14} />}
+              Submit
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="secondary" className="flex-1" onClick={() => actions.preview(template)}>
+            <Eye size={14} />
+            {template.status === "pending" ? "In review — preview" : "Preview"}
+          </Button>
+        )}
+      </div>
+    </Spotlight>
+  );
+}
+
+/** Per-template overflow menu with click-outside and Escape handling. */
+function ActionMenu({ template, actions }: { template: TemplateRecord; actions: TemplateActions }) {
+  const [position, setPosition] = useState<React.CSSProperties | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const editable = isEditable(template.status);
+  const open = position !== null;
+  const setOpen = (next: boolean | ((o: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(open) : next;
+    if (!value) return setPosition(null);
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    // Rendered in a portal so table/card overflow never clips it; flip upward near the viewport bottom.
+    const flipUp = rect.bottom + 300 > window.innerHeight && rect.top > 300;
+    setPosition({
+      position: "fixed",
+      right: Math.max(8, window.innerWidth - rect.right),
+      ...(flipUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
+    });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setPosition(null);
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) close();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+
+  const items: { label: string; icon: LucideIcon; onClick: () => void; danger?: boolean; href?: string; show: boolean }[] = [
+    { label: "Preview", icon: Eye, onClick: () => actions.preview(template), show: true },
+    { label: "Edit", icon: Pencil, onClick: () => actions.edit(template), show: editable },
+    { label: "Submit for review", icon: Send, onClick: () => actions.submit(template), show: editable },
+    {
+      label: "Use in campaign",
+      icon: Send,
+      onClick: () => undefined,
+      href: `/campaigns/new?template=${encodeURIComponent(template.name)}`,
+      show: template.status === "approved",
+    },
+    { label: "Duplicate", icon: Copy, onClick: () => actions.duplicate(template), show: true },
+    { label: "Delete", icon: Trash2, onClick: () => actions.remove(template), danger: true, show: true },
+  ];
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`More actions for ${template.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          "grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-brand-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          open && "bg-brand-50 text-primary",
+        )}
+      >
+        <MoreHorizontal size={17} />
+      </button>
+      {mounted &&
+        createPortal(
+      <AnimatePresence>
+        {position && (
+          <motion.div
+            key="menu"
+            ref={menuRef}
+            role="menu"
+            style={position}
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.16, ease }}
+            className="z-[60] w-52 origin-top-right rounded-2xl border border-border/80 bg-white p-1.5 text-left shadow-lift"
+          >
+            {items
+              .filter((item) => item.show)
+              .map((item) => {
+                const Icon = item.icon;
+                const className = cn(
+                  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none",
+                  item.danger
+                    ? "text-rose-600 hover:bg-rose-50 focus-visible:bg-rose-50"
+                    : "text-foreground hover:bg-brand-50 hover:text-brand-700 focus-visible:bg-brand-50",
+                );
+                return item.href ? (
+                  <Link key={item.label} role="menuitem" href={item.href} className={className} onClick={() => setOpen(false)}>
+                    <Icon size={15} />
+                    {item.label}
+                  </Link>
+                ) : (
+                  <button key={item.label} type="button" role="menuitem" onClick={run(item.onClick)} className={className}>
+                    <Icon size={15} />
+                    {item.label}
+                  </button>
+                );
+              })}
+          </motion.div>
+        )}
+      </AnimatePresence>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+function PreviewBody({ template }: { template: TemplateRecord }) {
+  const draft = toDraft(template.components);
+  const variables = extractVariables(draft.body);
+  const samples = samplesFrom(template.components, variables);
+  const header = headerFormatOf(template.components);
+
+  const details: { label: string; value: React.ReactNode }[] = [
+    { label: "Status", value: <StatusBadge status={template.status} /> },
+    { label: "Category", value: <CategoryBadge category={template.category} /> },
+    { label: "Language", value: `${languageLabel(template.language)} (${template.language})` },
+    { label: "Created", value: formatDate(template.created_at) },
+    { label: "Header", value: header ? header.charAt(0) + header.slice(1).toLowerCase() : "None" },
+    { label: "Buttons", value: draft.buttons.length || "None" },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start">
+      <div className="rounded-3xl bg-aurora p-4 sm:p-6">
+        <TemplatePreview draft={draft} samples={samples} />
+      </div>
+      <div className="space-y-5">
+        <dl className="grid grid-cols-2 gap-3">
+          {details.map((d) => (
+            <div key={d.label} className="rounded-xl border border-border/80 bg-white p-3">
+              <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{d.label}</dt>
+              <dd className="mt-1 text-sm font-semibold">{d.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {variables.length > 0 && (
+          <div>
+            <p className="mb-2 text-sm font-semibold">Variables</p>
+            <div className="flex flex-wrap gap-2">
+              {variables.map((v) => (
+                <span key={v} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-2 py-1 text-xs ring-1 ring-inset ring-brand-200">
+                  <code className="font-mono font-semibold text-brand-700">{`{{${v}}}`}</code>
+                  {samples[v] && <span className="text-muted-foreground">e.g. {samples[v]}</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {template.status === "rejected" && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-sm text-rose-700">
+            <p className="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle size={15} />
+              Rejected by Meta
+            </p>
+            <p className="mt-1">
+              {template.rejection_reason || "No reason was provided."} Edit the template and submit it again.
+            </p>
+          </div>
+        )}
+        {template.status === "pending" && (
+          <p className="flex items-start gap-2 rounded-xl bg-amber-50 p-3.5 text-sm text-amber-800">
+            <Clock3 size={15} className="mt-0.5 shrink-0" />
+            Meta is reviewing this template. Use “Sync with Meta” to pull the latest status.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PreviewFooter({
+  template,
+  actions,
+  onClose,
+}: {
+  template: TemplateRecord;
+  actions: TemplateActions;
+  onClose: () => void;
+}) {
+  const editable = isEditable(template.status);
+  const submitting = actions.submittingId === template.id;
+  return (
+    <>
+      <Button variant="ghost" onClick={onClose}>
+        Close
+      </Button>
+      <Button variant="outline" onClick={() => actions.duplicate(template)}>
+        <Copy size={15} />
+        Duplicate
+      </Button>
+      {editable && (
+        <>
+          <Button variant="outline" onClick={() => actions.edit(template)}>
+            <Pencil size={15} />
+            Edit
+          </Button>
+          <Button loading={submitting} onClick={() => actions.submit(template)}>
+            {!submitting && <Send size={15} />}
+            Submit for review
+          </Button>
+        </>
+      )}
+      {template.status === "approved" && (
+        <Link
+          href={`/campaigns/new?template=${encodeURIComponent(template.name)}`}
+          className={buttonVariants()}
+        >
+          <Send size={15} />
+          Use in campaign
+        </Link>
+      )}
+    </>
   );
 }

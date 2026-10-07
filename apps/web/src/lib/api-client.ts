@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "./supabase/client";
+import { DEMO_TOKEN, isWebDemo } from "./demo";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -17,14 +18,17 @@ export class ApiClientError extends Error {
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
+  if (isWebDemo) {
+    headers.Authorization = `Bearer ${DEMO_TOKEN}`;
+  } else {
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
   }
   // Set when the user has switched away from their default organization.
   const orgId = typeof window !== "undefined" ? localStorage.getItem("wa.orgId") : null;

@@ -1,27 +1,53 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   Check,
   FileText,
+  Film,
   Image as ImageIcon,
-  Loader2,
+  Link2,
+  MessageCirclePlus,
+  Music,
   Plus,
   Search,
+  Sparkles,
   Tag,
   Ticket,
   Trash2,
   UserCheck,
+  UserMinus,
   Users,
-  X,
+  Hash,
 } from "lucide-react";
+import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/states";
+import { SegmentedTabs, ease } from "@/components/motion";
 import { api, ApiClientError } from "@/lib/api-client";
 import { cn, initials } from "@/lib/utils";
+import { ContactAvatar, FieldLabel, ModalShell, SelectRow, useDebouncedValue } from "./inbox-ui";
+
+function errorMessage(err: unknown, fallback: string) {
+  if (err instanceof ApiClientError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+function ListSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} className="h-14 rounded-2xl" />
+      ))}
+    </div>
+  );
+}
 
 // --------------------------------------------------------------------------------
 // 1. Template Picker Modal
@@ -41,6 +67,17 @@ interface Template {
   };
 }
 
+const TEMPLATE_CATEGORIES = ["all", "marketing", "utility", "authentication"] as const;
+type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
+
+function extractPlaceholders(text: string) {
+  const matches = text.match(/\{\{(\d+)\}\}/g);
+  if (!matches) return [];
+  return Array.from(new Set(matches.map((m) => m.replace(/[{}]/g, "")))).sort(
+    (a, b) => Number(a) - Number(b),
+  );
+}
+
 export function TemplatePickerModal({
   conversationId,
   contactName,
@@ -54,267 +91,334 @@ export function TemplatePickerModal({
 }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<string>("all");
+  const [category, setCategory] = useState<TemplateCategory>("all");
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [variables, setVariables] = useState<Record<string, string>>({});
 
   const templatesQuery = useQuery({
     queryKey: ["templates", "approved"],
-    queryFn: () => api.get<{ data: Template[] }>("/templates", { status: "approved" }),
+    queryFn: () =>
+      api.get<{ data: Template[] }>("/templates", { status: "approved", pageSize: 100 }),
     enabled: isOpen,
   });
-
-  const sendTemplate = useMutation({
-    mutationFn: async () => {
-      if (!selectedTemplate) return;
-      return api.post(`/conversations/${conversationId}/messages`, {
-        type: "template",
-        templateId: selectedTemplate.id,
-        variables,
-      });
-    },
-    onSuccess: () => {
-      toast.success("Template message sent successfully");
-      void queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      onClose();
-      setSelectedTemplate(null);
-      setVariables({});
-    },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to send template");
-    },
-  });
-
-  if (!isOpen) return null;
-
-  const rawTemplates = templatesQuery.data?.data ?? [];
-  const filtered = rawTemplates.filter((tpl) => {
-    const matchesCategory = category === "all" || tpl.category === category;
-    const matchesSearch =
-      tpl.name.toLowerCase().includes(search.toLowerCase()) ||
-      (tpl.components.body?.text ?? "").toLowerCase().includes(search.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
-
-  const extractPlaceholders = (text: string) => {
-    const matches = text.match(/\{\{(\d+)\}\}/g);
-    if (!matches) return [];
-    return Array.from(new Set(matches.map((m) => m.replace(/[{}]/g, ""))));
-  };
 
   const placeholders = selectedTemplate?.components.body?.text
     ? extractPlaceholders(selectedTemplate.components.body.text)
     : [];
+  const missing = placeholders.filter((p) => !variables[p]?.trim());
+
+  const reset = () => {
+    setSelectedTemplate(null);
+    setVariables({});
+    setSearch("");
+    setCategory("all");
+  };
+
+  const close = () => {
+    onClose();
+    reset();
+  };
+
+  const sendTemplate = useMutation({
+    mutationFn: async () => {
+      if (!selectedTemplate) return;
+      // Only send values for placeholders the template actually has: Meta rejects
+      // body parameters for templates that don't declare them.
+      const payload: Record<string, string> = {};
+      for (const key of placeholders) payload[key] = variables[key]?.trim() ?? "";
+      return api.post(`/conversations/${conversationId}/messages`, {
+        type: "template",
+        templateId: selectedTemplate.id,
+        variables: payload,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Template message sent");
+      void queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      close();
+    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to send template")),
+  });
+
+  const rawTemplates = templatesQuery.data?.data ?? [];
+  const needle = search.trim().toLowerCase();
+  const filtered = rawTemplates.filter((tpl) => {
+    const matchesCategory = category === "all" || tpl.category?.toLowerCase() === category;
+    const matchesSearch =
+      !needle ||
+      tpl.name.toLowerCase().includes(needle) ||
+      (tpl.components.body?.text ?? "").toLowerCase().includes(needle);
+    return matchesCategory && matchesSearch;
+  });
 
   const renderPreviewText = () => {
     if (!selectedTemplate?.components.body?.text) return "";
     let body = selectedTemplate.components.body.text;
-    for (const [key, val] of Object.entries(variables)) {
-      body = body.replaceAll(`{{${key}}}`, val || `{{${key}}}`);
+    for (const key of placeholders) {
+      const value = variables[key]?.trim();
+      if (value) body = body.replaceAll(`{{${key}}}`, value);
     }
     return body;
   };
 
+  const header = selectedTemplate?.components.header;
+  const headerType = (header?.format ?? header?.type ?? "").toUpperCase();
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="flex h-[620px] w-full max-w-4xl flex-col rounded-2xl border bg-card shadow-2xl overflow-hidden">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div>
-            <h3 className="text-lg font-bold text-foreground">Browse Message Templates</h3>
-            <p className="text-xs text-muted-foreground">
-              Send an approved WhatsApp template to restart the 24-hour window with {contactName ?? "this contact"}
+    <ModalShell
+      open={isOpen}
+      onClose={close}
+      size="xl"
+      icon={Sparkles}
+      title="Send a message template"
+      description={`Approved templates can be sent anytime and reopen the 24-hour window with ${contactName ?? "this contact"}.`}
+      bodyClassName="px-0 pb-0 sm:px-0"
+      footer={
+        <>
+          {selectedTemplate && missing.length > 0 && (
+            <p className="mr-auto text-xs text-muted-foreground">
+              Fill {missing.length} more {missing.length === 1 ? "variable" : "variables"} to send
             </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+          )}
+          <Button variant="outline" size="sm" onClick={close}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            loading={sendTemplate.isPending}
+            disabled={!selectedTemplate || missing.length > 0}
+            onClick={() => sendTemplate.mutate()}
           >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Modal Content - Split layout */}
-        <div className="flex flex-1 min-h-0 divide-x">
-          {/* Left: Template Catalog */}
-          <div className="flex w-1/2 flex-col p-4">
-            <div className="space-y-2 pb-3">
-              <div className="relative">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search templates..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-9 text-sm"
-                />
-              </div>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs">
-                {["all", "marketing", "utility", "authentication"].map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setCategory(cat)}
-                    className={cn(
-                      "rounded-lg px-2.5 py-1 font-semibold capitalize transition-colors",
-                      category === cat
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80",
-                    )}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
+            Send template
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 min-h-0 border-t border-border/70 md:h-[520px] md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        {/* Catalog */}
+        <div className="flex min-h-0 flex-col border-b border-border/70 md:border-b-0 md:border-r">
+          <div className="space-y-3 p-4">
+            <div className="relative">
+              <Search
+                size={15}
+                aria-hidden
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                aria-label="Search templates"
+                placeholder="Search templates…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-10 pl-10"
+              />
             </div>
-
-            <div className="scrollbar-thin flex-1 space-y-2 overflow-y-auto pr-1">
-              {templatesQuery.isLoading ? (
-                <div className="grid h-40 place-items-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  No approved templates match your search.
-                </div>
-              ) : (
-                filtered.map((tpl) => {
-                  const active = selectedTemplate?.id === tpl.id;
-                  return (
-                    <button
-                      key={tpl.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedTemplate(tpl);
-                        setVariables(
-                          contactName
-                            ? { "1": contactName }
-                            : {},
-                        );
-                      }}
-                      className={cn(
-                        "flex w-full flex-col items-start gap-1 rounded-xl border p-3 text-left transition-all",
-                        active
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
-                          : "hover:border-border/80 hover:bg-muted/40",
-                      )}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <span className="font-semibold text-sm text-foreground truncate">{tpl.name}</span>
-                        <Badge tone={tpl.category === "marketing" ? "warning" : "info"} className="text-[10px] capitalize">
-                          {tpl.category}
-                        </Badge>
-                      </div>
-                      <p className="line-clamp-2 text-xs text-muted-foreground">
-                        {tpl.components.body?.text ?? "No body text"}
-                      </p>
-                    </button>
-                  );
-                })
-              )}
+            <div className="scrollbar-none -mx-1 overflow-x-auto px-1">
+              <SegmentedTabs
+                layoutId="template-category"
+                value={category}
+                onChange={setCategory}
+                tabs={TEMPLATE_CATEGORIES.map((c) => ({
+                  value: c,
+                  label: <span className="capitalize">{c}</span>,
+                }))}
+                className="[&_button]:px-3 [&_button]:text-xs"
+              />
             </div>
           </div>
 
-          {/* Right: Customization & Preview */}
-          <div className="flex w-1/2 flex-col bg-muted/10 p-5">
-            {selectedTemplate ? (
-              <div className="flex flex-1 flex-col justify-between">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Template Variables
-                    </h4>
-                    {placeholders.length === 0 ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        This template has no variable placeholders.
-                      </p>
-                    ) : (
-                      <div className="mt-2 space-y-2">
-                        {placeholders.map((num) => (
-                          <div key={num} className="flex items-center gap-2">
-                            <span className="grid h-8 w-10 shrink-0 place-items-center rounded-lg bg-muted text-xs font-mono font-bold">
-                              {`{{${num}}}`}
-                            </span>
-                            <Input
-                              placeholder={`Value for {{${num}}}...`}
-                              value={variables[num] ?? ""}
-                              onChange={(e) =>
-                                setVariables((prev) => ({ ...prev, [num]: e.target.value }))
-                              }
-                              className="h-8 text-xs"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                      Live WhatsApp Preview
-                    </h4>
-                    <div className="rounded-2xl border bg-[#EFEAE2] dark:bg-zinc-900 p-4 shadow-inner">
-                      <div className="max-w-[85%] rounded-xl bg-white dark:bg-zinc-800 p-3 shadow-md">
-                        {selectedTemplate.components.header?.type === "IMAGE" && (
-                          <div className="mb-2 grid h-28 place-items-center rounded-lg bg-muted/60 text-muted-foreground">
-                            <ImageIcon size={28} />
-                          </div>
-                        )}
-                        <p className="whitespace-pre-wrap break-words text-xs text-zinc-900 dark:text-zinc-100">
-                          {renderPreviewText()}
-                        </p>
-                        {selectedTemplate.components.footer?.text && (
-                          <p className="mt-2 text-[10px] text-zinc-500">
-                            {selectedTemplate.components.footer.text}
-                          </p>
-                        )}
-                        {selectedTemplate.components.buttons && selectedTemplate.components.buttons.length > 0 && (
-                          <div className="mt-2.5 space-y-1 border-t pt-2">
-                            {selectedTemplate.components.buttons.map((btn, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-center rounded-md bg-zinc-50 dark:bg-zinc-700/50 py-1 text-center text-xs font-semibold text-[#00C268]"
-                              >
-                                {btn.text}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-4 border-t">
-                  <Button variant="outline" size="sm" onClick={onClose}>
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    loading={sendTemplate.isPending}
-                    onClick={() => sendTemplate.mutate()}
-                    className="bg-[#00C268] hover:bg-[#00B05D] text-white"
+          <div className="scrollbar-thin max-h-[36vh] min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4 md:max-h-none">
+            {templatesQuery.isLoading ? (
+              <ListSkeleton rows={4} />
+            ) : templatesQuery.isError ? (
+              <p className="p-6 text-center text-sm text-destructive">
+                {errorMessage(templatesQuery.error, "Templates could not be loaded.")}
+              </p>
+            ) : filtered.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-sm font-semibold">No approved templates found</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {rawTemplates.length === 0
+                    ? "Create a template and wait for Meta approval to use it here."
+                    : "Try another search or category."}
+                </p>
+                {rawTemplates.length === 0 && (
+                  <Link
+                    href="/campaigns/templates"
+                    className="mt-3 inline-block text-xs font-semibold text-primary hover:underline"
                   >
-                    Send Template Message
-                  </Button>
-                </div>
+                    Go to your templates
+                  </Link>
+                )}
               </div>
             ) : (
-              <div className="grid flex-1 place-items-center text-center">
-                <div className="max-w-xs space-y-2">
-                  <FileText className="mx-auto h-10 w-10 text-muted-foreground/60" />
-                  <p className="text-sm font-semibold">Select a template</p>
-                  <p className="text-xs text-muted-foreground">
-                    Choose an approved template from the list on the left to preview and customize variables before sending.
-                  </p>
-                </div>
-              </div>
+              filtered.map((tpl, i) => {
+                const active = selectedTemplate?.id === tpl.id;
+                return (
+                  <motion.button
+                    key={tpl.id}
+                    type="button"
+                    initial={i < 12 ? { opacity: 0, y: 8 } : false}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, ease, delay: Math.min(i, 12) * 0.03 }}
+                    onClick={() => {
+                      setSelectedTemplate(tpl);
+                      const ph = tpl.components.body?.text ? extractPlaceholders(tpl.components.body.text) : [];
+                      setVariables(contactName && ph.includes("1") ? { "1": contactName } : {});
+                    }}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex w-full flex-col items-start gap-1.5 rounded-2xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      active
+                        ? "border-brand-300 bg-brand-50/80 shadow-[0_0_0_3px_rgba(131,58,180,0.08)]"
+                        : "border-border/80 bg-white hover:border-brand-200 hover:bg-brand-50/30",
+                    )}
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-foreground">{tpl.name}</span>
+                      <Badge
+                        tone={tpl.category === "marketing" ? "brand" : tpl.category === "authentication" ? "warning" : "info"}
+                        className="shrink-0 text-[10px] capitalize"
+                      >
+                        {tpl.category}
+                      </Badge>
+                    </div>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
+                      {tpl.components.body?.text ?? "No body text"}
+                    </p>
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+                      {tpl.language}
+                    </span>
+                  </motion.button>
+                );
+              })
             )}
           </div>
         </div>
+
+        {/* Customise + preview */}
+        <div className="scrollbar-thin min-h-0 overflow-y-auto bg-gradient-to-b from-brand-50/40 to-white p-4 sm:p-5">
+          <AnimatePresence mode="wait" initial={false}>
+            {selectedTemplate ? (
+              <motion.div
+                key={selectedTemplate.id}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: 0.25, ease }}
+                className="space-y-5"
+              >
+                <div>
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                    Variables
+                  </h3>
+                  {placeholders.length === 0 ? (
+                    <p className="mt-1.5 text-xs text-muted-foreground">This template has no variables.</p>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {placeholders.map((num) => (
+                        <VariableInput
+                          key={num}
+                          num={num}
+                          value={variables[num] ?? ""}
+                          onChange={(v) => setVariables((prev) => ({ ...prev, [num]: v }))}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                    Preview
+                  </h3>
+                  <div className="rounded-3xl border border-border/70 bg-[radial-gradient(hsl(268_25%_88%/0.6)_1px,transparent_1px)] bg-brand-50/50 bg-[length:16px_16px] p-4">
+                    <div className="max-w-[88%] rounded-2xl rounded-tl-md bg-white p-3 shadow-soft">
+                      {headerType === "IMAGE" && (
+                        <div className="mb-2 grid h-28 place-items-center rounded-xl bg-gradient-to-br from-brand-100 to-brand-50 text-brand-400">
+                          <ImageIcon size={28} />
+                        </div>
+                      )}
+                      {headerType === "TEXT" && header?.text && (
+                        <p className="mb-1 text-sm font-bold">{header.text}</p>
+                      )}
+                      <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+                        {renderPreviewText()}
+                      </p>
+                      {selectedTemplate.components.footer?.text && (
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {selectedTemplate.components.footer.text}
+                        </p>
+                      )}
+                      {selectedTemplate.components.buttons && selectedTemplate.components.buttons.length > 0 && (
+                        <div className="mt-2.5 space-y-1 border-t border-border/70 pt-2">
+                          {selectedTemplate.components.buttons.map((btn, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-center rounded-lg py-1.5 text-center text-xs font-semibold text-primary"
+                            >
+                              {btn.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="grid h-full min-h-[200px] place-items-center text-center"
+              >
+                <div className="max-w-xs space-y-2">
+                  <span className="mx-auto grid h-14 w-14 animate-float place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+                    <FileText size={24} />
+                  </span>
+                  <p className="pt-2 font-display text-base font-semibold">Pick a template</p>
+                  <p className="text-xs text-muted-foreground">
+                    Choose an approved template to fill its variables and preview exactly what your
+                    customer will see.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
+    </ModalShell>
+  );
+}
+
+function VariableInput({
+  num,
+  value,
+  onChange,
+}: {
+  num: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex items-center gap-2">
+      <label
+        htmlFor={id}
+        className="grid h-10 w-12 shrink-0 place-items-center rounded-xl bg-white font-mono text-xs font-bold text-primary ring-1 ring-brand-200"
+      >
+        {`{{${num}}}`}
+      </label>
+      <Input
+        id={id}
+        placeholder={`Value for {{${num}}}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10"
+        aria-invalid={!value.trim() || undefined}
+      />
     </div>
   );
 }
@@ -323,11 +427,11 @@ export function TemplatePickerModal({
 // 2. Assign Agent Modal
 // --------------------------------------------------------------------------------
 
-interface AgentMember {
+export interface AgentMember {
   id: string;
   role: string;
   isOnline: boolean;
-  user: { id: string; name: string | null; email: string };
+  user: { id: string; name: string | null; email: string } | null;
   openConversations: number;
 }
 
@@ -353,117 +457,121 @@ export function AssignAgentModal({
   const assignMutation = useMutation({
     mutationFn: (assignedTo: string | null) =>
       api.patch(`/conversations/${conversationId}`, { assignedTo }),
-    onSuccess: () => {
-      toast.success("Assignment updated");
+    onSuccess: (_data, assignedTo) => {
+      toast.success(assignedTo ? "Conversation assigned" : "Conversation unassigned");
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "agents"] });
       onClose();
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to assign conversation");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to assign conversation")),
   });
 
-  if (!isOpen) return null;
-
-  const agents = agentsQuery.data?.data ?? [];
+  const agents = (agentsQuery.data?.data ?? []).filter((a) => a.user);
+  const pendingId = assignMutation.isPending ? (assignMutation.variables ?? "none") : undefined;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <UserCheck size={18} className="text-[#00C268]" />
-            <h3 className="text-base font-bold">Assign Conversation</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-          {agentsQuery.isLoading ? (
-            <div className="grid h-32 place-items-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => assignMutation.mutate(null)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-xl border p-3 text-left transition-colors",
-                  !currentAssigneeId ? "border-primary bg-primary/5" : "hover:bg-muted/60",
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
-                    ∅
-                  </span>
-                  <div>
-                    <p className="text-sm font-semibold">Unassigned</p>
-                    <p className="text-xs text-muted-foreground">Leave in the general inbox queue</p>
-                  </div>
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={UserCheck}
+      title="Assign conversation"
+      description="Route this chat to a teammate. Agents see their assigned conversations first."
+      footer={
+        <Button variant="outline" size="sm" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <div className="space-y-2">
+        {agentsQuery.isLoading ? (
+          <ListSkeleton rows={3} />
+        ) : (
+          <>
+            <SelectRow
+              selected={!currentAssigneeId}
+              disabled={assignMutation.isPending}
+              onClick={() => assignMutation.mutate(null)}
+            >
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-full border border-dashed border-border text-muted-foreground">
+                  <UserMinus size={16} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">Unassigned</p>
+                  <p className="text-xs text-muted-foreground">
+                    {pendingId === "none" ? "Updating…" : "Keep it in the shared queue"}
+                  </p>
                 </div>
-                {!currentAssigneeId && <Check size={16} className="text-primary" />}
-              </button>
+              </div>
+            </SelectRow>
 
-              {agents.map((agent) => {
-                const isAssigned = currentAssigneeId === agent.user.id;
-                return (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    onClick={() => assignMutation.mutate(agent.user.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-xl border p-3 text-left transition-colors",
-                      isAssigned ? "border-primary bg-primary/5" : "hover:bg-muted/60",
-                    )}
+            {agents.length === 0 && !agentsQuery.isError && (
+              <p className="rounded-2xl border border-dashed p-4 text-center text-xs text-muted-foreground">
+                No agents or managers in this workspace yet.{" "}
+                <Link href="/admin/agents" className="font-semibold text-primary hover:underline">
+                  Invite your team
+                </Link>
+              </p>
+            )}
+            {agentsQuery.isError && (
+              <p className="p-4 text-center text-xs text-destructive">
+                {errorMessage(agentsQuery.error, "Agents could not be loaded.")}
+              </p>
+            )}
+
+            {agents.map((agent, i) => {
+              const user = agent.user!;
+              const isAssigned = currentAssigneeId === user.id;
+              return (
+                <motion.div
+                  key={agent.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease, delay: Math.min(i, 10) * 0.04 }}
+                >
+                  <SelectRow
+                    selected={isAssigned}
+                    disabled={assignMutation.isPending}
+                    onClick={() => assignMutation.mutate(user.id)}
                   >
                     <div className="flex items-center gap-3">
                       <div className="relative">
-                        <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                          {initials(agent.user.name, "A")}
+                        <span className="grid h-10 w-10 place-items-center rounded-full bg-brand-gradient text-xs font-bold text-white">
+                          {initials(user.name ?? user.email, "A")}
                         </span>
                         <span
                           className={cn(
-                            "absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-card",
-                            agent.isOnline ? "bg-emerald-500" : "bg-zinc-400",
+                            "absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white",
+                            agent.isOnline ? "bg-emerald-500" : "bg-zinc-300",
                           )}
+                          title={agent.isOnline ? "Online" : "Offline"}
                         />
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold">{agent.user.name ?? agent.user.email}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {agent.role} · {agent.openConversations} active {agent.openConversations === 1 ? "chat" : "chats"}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{user.name ?? user.email}</p>
+                        <p className="text-xs capitalize text-muted-foreground">
+                          {pendingId === user.id
+                            ? "Assigning…"
+                            : `${agent.role} · ${agent.openConversations} open ${agent.openConversations === 1 ? "chat" : "chats"}`}
                         </p>
                       </div>
                     </div>
-                    {isAssigned && <Check size={16} className="text-primary" />}
-                  </button>
-                );
-              })}
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end pt-2">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
+                  </SelectRow>
+                </motion.div>
+              );
+            })}
+          </>
+        )}
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
 // --------------------------------------------------------------------------------
 // 3. New Conversation Modal
 // --------------------------------------------------------------------------------
+
+const WA_ID_PATTERN = /^[1-9]\d{7,14}$/;
 
 export function NewConversationModal({
   isOpen,
@@ -476,33 +584,55 @@ export function NewConversationModal({
 }) {
   const [tab, setTab] = useState<"existing" | "new">("existing");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim(), 250);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
+  const [touched, setTouched] = useState(false);
+  const phoneId = useId();
+  const nameId = useId();
 
   const contactsQuery = useQuery({
-    queryKey: ["contacts", { search }],
-    queryFn: () => api.get<{ data: { id: string; name: string | null; wa_id: string }[] }>("/contacts", { search }),
+    queryKey: ["contacts", { search: debouncedSearch }],
+    queryFn: () =>
+      api.get<{ data: { id: string; name: string | null; wa_id: string }[] }>("/contacts", {
+        search: debouncedSearch,
+      }),
     enabled: isOpen && tab === "existing",
   });
+
+  const reset = () => {
+    setPhone("");
+    setName("");
+    setSearch("");
+    setTouched(false);
+    setTab("existing");
+  };
+
+  const close = () => {
+    onClose();
+    reset();
+  };
 
   const startWithExisting = useMutation({
     mutationFn: (contactId: string) => api.post<{ id: string }>("/conversations", { contactId }),
     onSuccess: (res) => {
       toast.success("Conversation opened");
       onSelectConversation(res.id);
-      onClose();
+      close();
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to open conversation");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to open conversation")),
   });
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  const phoneError = !cleanPhone
+    ? "Enter a phone number"
+    : !WA_ID_PATTERN.test(cleanPhone)
+      ? "Use 8–15 digits with country code, e.g. 919876543210"
+      : null;
 
   const startWithNew = useMutation({
     mutationFn: async () => {
-      const cleanPhone = phone.replace(/\D/g, "");
-      if (!cleanPhone || cleanPhone.length < 8) {
-        throw new Error("Please enter a valid phone number with country code");
-      }
+      if (phoneError) throw new Error(phoneError);
       const contact = await api.post<{ id: string }>("/contacts", {
         waId: cleanPhone,
         name: name.trim() || undefined,
@@ -514,140 +644,185 @@ export function NewConversationModal({
     onSuccess: (res) => {
       toast.success("New conversation started");
       onSelectConversation(res.id);
-      onClose();
-      setPhone("");
-      setName("");
+      close();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to create conversation");
+      if (err instanceof ApiClientError && err.status === 409) {
+        // The number is already a contact — jump to it instead of failing.
+        toast.info("That number is already a contact — pick it below.");
+        setTab("existing");
+        setSearch(cleanPhone);
+        return;
+      }
+      toast.error(errorMessage(err, "Failed to create conversation"));
     },
   });
 
-  if (!isOpen) return null;
+  const contacts = contactsQuery.data?.data ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <Plus size={18} className="text-[#00C268]" />
-            <h3 className="text-base font-bold">New Conversation</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <ModalShell
+      open={isOpen}
+      onClose={close}
+      icon={MessageCirclePlus}
+      title="New conversation"
+      description="Message an existing contact or start a chat with a new number."
+    >
+      <div className="space-y-4">
+        <SegmentedTabs
+          layoutId="new-convo-tabs"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: "existing", label: "Existing contact" },
+            { value: "new", label: "New number" },
+          ]}
+          className="grid w-full grid-cols-2"
+        />
 
-        {/* Tab switcher */}
-        <div className="flex rounded-xl bg-muted p-1 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setTab("existing")}
-            className={cn(
-              "flex-1 rounded-lg py-1.5 transition-colors",
-              tab === "existing" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
-            )}
-          >
-            Select Existing Contact
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("new")}
-            className={cn(
-              "flex-1 rounded-lg py-1.5 transition-colors",
-              tab === "new" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
-            )}
-          >
-            Direct Number
-          </button>
-        </div>
-
-        {tab === "existing" ? (
-          <div className="space-y-3">
-            <div className="relative">
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search by name or number..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-9 text-sm"
-              />
-            </div>
-
-            <div className="max-h-60 space-y-1 overflow-y-auto">
-              {contactsQuery.isLoading ? (
-                <div className="grid h-28 place-items-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                </div>
-              ) : contactsQuery.data?.data.length === 0 ? (
-                <p className="p-6 text-center text-xs text-muted-foreground">
-                  No contacts found.
-                </p>
-              ) : (
-                contactsQuery.data?.data.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => startWithExisting.mutate(c.id)}
-                    className="flex w-full items-center justify-between rounded-xl p-2.5 text-left hover:bg-muted/60 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                        {initials(c.name, c.wa_id.slice(-2))}
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold">{c.name ?? `+${c.wa_id}`}</p>
-                        <p className="text-xs text-muted-foreground">+{c.wa_id}</p>
-                      </div>
-                    </div>
-                    <span className="text-xs font-semibold text-primary">Chat →</span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-bold text-muted-foreground">Phone Number (with Country Code)</label>
-              <Input
-                placeholder="e.g. 919266806659"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="mt-1 text-sm font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-muted-foreground">Contact Name (Optional)</label>
-              <Input
-                placeholder="e.g. Ayush Sharma"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1 text-sm"
-              />
-            </div>
-            <Button
-              className="w-full bg-[#00C268] hover:bg-[#00B05D] text-white"
-              loading={startWithNew.isPending}
-              onClick={() => startWithNew.mutate()}
+        <AnimatePresence mode="wait" initial={false}>
+          {tab === "existing" ? (
+            <motion.div
+              key="existing"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              transition={{ duration: 0.2, ease }}
+              className="space-y-3"
             >
-              Start Conversation
-            </Button>
-          </div>
-        )}
+              <div className="relative">
+                <Search
+                  size={15}
+                  aria-hidden
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  aria-label="Search contacts"
+                  placeholder="Search by name or number…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-10 pl-10"
+                  data-autofocus
+                />
+              </div>
+
+              <div className="scrollbar-thin -mx-1 max-h-72 space-y-1 overflow-y-auto px-1">
+                {contactsQuery.isLoading ? (
+                  <ListSkeleton rows={3} />
+                ) : contactsQuery.isError ? (
+                  <p className="p-6 text-center text-xs text-destructive">
+                    {errorMessage(contactsQuery.error, "Contacts could not be loaded.")}
+                  </p>
+                ) : contacts.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <p className="text-sm font-semibold">No contacts found</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const digits = search.replace(/\D/g, "");
+                        if (digits) setPhone(digits);
+                        setTab("new");
+                      }}
+                      className="mt-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      Start a chat with a new number instead
+                    </button>
+                  </div>
+                ) : (
+                  contacts.map((c, i) => (
+                    <motion.button
+                      key={c.id}
+                      type="button"
+                      initial={i < 12 ? { opacity: 0, y: 6 } : false}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, ease, delay: Math.min(i, 12) * 0.025 }}
+                      disabled={startWithExisting.isPending}
+                      onClick={() => startWithExisting.mutate(c.id)}
+                      className="group flex w-full items-center justify-between gap-3 rounded-2xl p-2.5 text-left transition-colors hover:bg-brand-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <ContactAvatar name={c.name} waId={c.wa_id} seed={c.id} size="sm" />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{c.name ?? `+${c.wa_id}`}</p>
+                          <p className="text-xs tabular-nums text-muted-foreground">+{c.wa_id}</p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-primary opacity-70 ring-1 ring-brand-200 transition-opacity group-hover:opacity-100">
+                        {startWithExisting.isPending && startWithExisting.variables === c.id ? "Opening…" : "Chat"}
+                      </span>
+                    </motion.button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          ) : (
+            <motion.form
+              key="new"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.2, ease }}
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setTouched(true);
+                if (!phoneError) startWithNew.mutate();
+              }}
+            >
+              <div>
+                <FieldLabel htmlFor={phoneId} hint="Include country code">
+                  Phone number
+                </FieldLabel>
+                <Input
+                  id={phoneId}
+                  inputMode="tel"
+                  autoComplete="off"
+                  placeholder="e.g. 919876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  onBlur={() => setTouched(true)}
+                  aria-invalid={(touched && !!phoneError) || undefined}
+                  aria-describedby={`${phoneId}-err`}
+                  className="tabular-nums"
+                />
+                {touched && phoneError && (
+                  <p id={`${phoneId}-err`} role="alert" className="mt-1 text-xs font-medium text-destructive">
+                    {phoneError}
+                  </p>
+                )}
+              </div>
+              <div>
+                <FieldLabel htmlFor={nameId} hint="Optional">
+                  Contact name
+                </FieldLabel>
+                <Input
+                  id={nameId}
+                  placeholder="e.g. Jane Cooper"
+                  maxLength={120}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <p className="rounded-xl bg-brand-50/70 px-3 py-2 text-[11px] leading-relaxed text-brand-800">
+                The contact is saved as opted-in. New chats start with an approved template until
+                they reply.
+              </p>
+              <Button type="submit" className="w-full" loading={startWithNew.isPending}>
+                Start conversation
+              </Button>
+            </motion.form>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
 // --------------------------------------------------------------------------------
 // 4. Edit Attributes Modal
 // --------------------------------------------------------------------------------
+
+type AttributeRow = { id: number; key: string; value: string };
 
 export function EditAttributesModal({
   contactId,
@@ -661,113 +836,126 @@ export function EditAttributesModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [attributes, setAttributes] = useState<{ key: string; value: string }[]>(() =>
-    Object.entries(currentAttributes).map(([k, v]) => ({ key: k, value: String(v ?? "") })),
-  );
+  const [rows, setRows] = useState<AttributeRow[]>([]);
+  const [nextId, setNextId] = useState(0);
+
+  // Load the latest saved attributes each time the dialog opens (the contact
+  // may have loaded after this component mounted).
+  useEffect(() => {
+    if (!isOpen) return;
+    const entries = Object.entries(currentAttributes).map(([k, v], i) => ({
+      id: i,
+      key: k,
+      value: v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v),
+    }));
+    setRows(entries);
+    setNextId(entries.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const keys = rows.map((r) => r.key.trim()).filter(Boolean);
+  const duplicate = keys.find((k, i) => keys.indexOf(k) !== i);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, string> = {};
-      for (const item of attributes) {
-        if (item.key.trim()) {
-          payload[item.key.trim()] = item.value.trim();
-        }
+      for (const item of rows) {
+        if (item.key.trim()) payload[item.key.trim()] = item.value.trim();
       }
       return api.patch(`/contacts/${contactId}`, { attributes: payload });
     },
     onSuccess: () => {
-      toast.success("Contact attributes updated");
+      toast.success("Attributes saved");
       void queryClient.invalidateQueries({ queryKey: ["contact", contactId] });
       void queryClient.invalidateQueries({ queryKey: ["contacts"] });
       onClose();
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to update attributes");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to update attributes")),
   });
 
-  if (!isOpen) return null;
+  const update = (id: number, patch: Partial<AttributeRow>) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const addRow = () => {
+    setRows((prev) => [...prev, { id: nextId, key: "", value: "" }]);
+    setNextId((n) => n + 1);
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-base font-bold">Manage Custom Attributes</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-          {attributes.length === 0 ? (
-            <p className="p-4 text-center text-xs text-muted-foreground">
-              No attributes yet. Add custom fields like Department, Order ID, or City.
-            </p>
-          ) : (
-            attributes.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <Input
-                  placeholder="Key (e.g. department)"
-                  value={item.key}
-                  onChange={(e) => {
-                    const next = [...attributes];
-                    next[idx].key = e.target.value;
-                    setAttributes(next);
-                  }}
-                  className="h-8 text-xs font-semibold"
-                />
-                <Input
-                  placeholder="Value (e.g. SMM)"
-                  value={item.value}
-                  onChange={(e) => {
-                    const next = [...attributes];
-                    next[idx].value = e.target.value;
-                    setAttributes(next);
-                  }}
-                  className="h-8 text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => setAttributes(attributes.filter((_, i) => i !== idx))}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={Hash}
+      title="Custom attributes"
+      description="Store details like city, order ID or plan to personalise replies and campaigns."
+      footer={
+        <>
+          {duplicate && (
+            <p className="mr-auto text-xs font-medium text-destructive">Duplicate key “{duplicate}”</p>
           )}
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setAttributes([...attributes, { key: "", value: "" }])}
-          className="w-full text-xs"
-        >
-          <Plus size={14} className="mr-1" /> Add Field
-        </Button>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
           <Button
             size="sm"
             loading={saveMutation.isPending}
+            disabled={!!duplicate}
             onClick={() => saveMutation.mutate()}
-            className="bg-[#00C268] hover:bg-[#00B05D] text-white"
           >
-            Save Attributes
+            Save attributes
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        {rows.length === 0 ? (
+          <div className="rounded-2xl border border-dashed p-6 text-center text-xs text-muted-foreground">
+            No attributes yet. Add fields like <span className="font-semibold">city</span> or{" "}
+            <span className="font-semibold">order_id</span>.
+          </div>
+        ) : (
+          <AnimatePresence initial={false}>
+            {rows.map((item) => (
+              <motion.div
+                key={item.id}
+                layout
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2, ease }}
+                className="flex items-center gap-2"
+              >
+                <Input
+                  aria-label="Attribute key"
+                  placeholder="Key (e.g. city)"
+                  value={item.key}
+                  onChange={(e) => update(item.id, { key: e.target.value })}
+                  className="h-10 font-semibold"
+                />
+                <Input
+                  aria-label="Attribute value"
+                  placeholder="Value"
+                  value={item.value}
+                  onChange={(e) => update(item.id, { value: e.target.value })}
+                  className="h-10"
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.key || "attribute"}`}
+                  onClick={() => setRows((prev) => prev.filter((r) => r.id !== item.id))}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-rose-50 hover:text-destructive"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        )}
+        <Button type="button" variant="outline" size="sm" onClick={addRow} className="mt-1 w-full border-dashed">
+          <Plus size={15} /> Add field
+        </Button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -780,6 +968,8 @@ interface TagItem {
   name: string;
   color: string;
 }
+
+const TAG_SWATCHES = ["#833AB4", "#C13584", "#E1306C", "#F77737", "#FCAF45", "#6D28D9", "#0EA5E9", "#10B981"];
 
 export function ManageTagsModal({
   contactId,
@@ -795,7 +985,13 @@ export function ManageTagsModal({
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>(assignedTagIds);
   const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#16A34A");
+  const [newTagColor, setNewTagColor] = useState("#833AB4");
+
+  // Re-sync with the contact's current tags whenever the dialog opens.
+  useEffect(() => {
+    if (isOpen) setSelected(assignedTagIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   const tagsQuery = useQuery({
     queryKey: ["tags"],
@@ -808,128 +1004,146 @@ export function ManageTagsModal({
     onSuccess: (newTag) => {
       setSelected((prev) => [...prev, newTag.id]);
       setNewTagName("");
+      toast.success(`Tag “${newTag.name}” created`);
       void queryClient.invalidateQueries({ queryKey: ["tags"] });
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to create tag");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to create tag")),
   });
 
   const saveMutation = useMutation({
     mutationFn: () => api.patch(`/contacts/${contactId}`, { tagIds: selected }),
     onSuccess: () => {
-      toast.success("Contact tags updated");
+      toast.success("Tags updated");
       void queryClient.invalidateQueries({ queryKey: ["contact", contactId] });
       void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      void queryClient.invalidateQueries({ queryKey: ["tags"] });
       onClose();
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to update tags");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to update tags")),
   });
 
-  if (!isOpen) return null;
-
   const allTags = tagsQuery.data?.data ?? [];
+  const toggle = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <Tag size={18} className="text-[#00C268]" />
-            <h3 className="text-base font-bold">Assign Tags</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-          {tagsQuery.isLoading ? (
-            <div className="grid h-24 place-items-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            </div>
-          ) : allTags.length === 0 ? (
-            <p className="p-4 text-center text-xs text-muted-foreground">No tags exist yet.</p>
-          ) : (
-            allTags.map((tag) => {
-              const isChecked = selected.includes(tag.id);
-              return (
-                <button
-                  key={tag.id}
-                  type="button"
-                  onClick={() =>
-                    setSelected((prev) =>
-                      isChecked ? prev.filter((id) => id !== tag.id) : [...prev, tag.id],
-                    )
-                  }
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-xl border p-2.5 text-left transition-colors",
-                    isChecked ? "border-primary bg-primary/5" : "hover:bg-muted/60",
-                  )}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="h-3.5 w-3.5 rounded-full" style={{ backgroundColor: tag.color }} />
-                    <span className="text-sm font-semibold">{tag.name}</span>
-                  </div>
-                  {isChecked && <Check size={16} className="text-primary" />}
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        {/* Quick create tag */}
-        <div className="rounded-xl border bg-muted/30 p-2.5 space-y-2">
-          <p className="text-xs font-bold text-muted-foreground">Create New Tag</p>
-          <div className="flex gap-2">
-            <Input
-              placeholder="Tag name (e.g. SMM, VIP)"
-              value={newTagName}
-              onChange={(e) => setNewTagName(e.target.value)}
-              className="h-8 text-xs flex-1"
-            />
-            <input
-              type="color"
-              value={newTagColor}
-              onChange={(e) => setNewTagColor(e.target.value)}
-              aria-label="Tag color"
-              className="h-8 w-8 cursor-pointer rounded-lg border p-0.5 bg-transparent"
-            />
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 text-xs"
-              loading={createTag.isPending}
-              disabled={!newTagName.trim()}
-              onClick={() => createTag.mutate()}
-            >
-              Add
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={Tag}
+      title="Tags"
+      description="Label this contact to segment campaigns and filter your inbox."
+      footer={
+        <>
+          <span className="mr-auto text-xs text-muted-foreground">{selected.length} selected</span>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            loading={saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-            className="bg-[#00C268] hover:bg-[#00B05D] text-white"
-          >
-            Save Tags
+          <Button size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+            Save tags
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {tagsQuery.isLoading ? (
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-20 rounded-full" />
+            ))}
+          </div>
+        ) : allTags.length === 0 ? (
+          <p className="rounded-2xl border border-dashed p-4 text-center text-xs text-muted-foreground">
+            No tags yet — create your first one below.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Available tags">
+            {allTags.map((tag) => {
+              const isChecked = selected.includes(tag.id);
+              return (
+                <motion.button
+                  key={tag.id}
+                  type="button"
+                  whileTap={{ scale: 0.94 }}
+                  aria-pressed={isChecked}
+                  onClick={() => toggle(tag.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                    isChecked
+                      ? "border-transparent bg-brand-gradient text-white shadow-[0_6px_16px_-8px_rgba(131,58,180,0.8)]"
+                      : "border-border bg-white text-foreground hover:border-brand-200 hover:bg-brand-50/50",
+                  )}
+                >
+                  {isChecked ? (
+                    <Check size={12} />
+                  ) : (
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                  )}
+                  {tag.name}
+                </motion.button>
+              );
+            })}
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (newTagName.trim()) createTag.mutate();
+          }}
+          className="space-y-3 rounded-2xl border border-border/80 bg-muted/30 p-3"
+        >
+          <p className="text-xs font-semibold text-foreground/80">Create a new tag</p>
+          <div className="flex gap-2">
+            <Input
+              aria-label="New tag name"
+              placeholder="e.g. VIP, Lead, Wholesale"
+              maxLength={60}
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              className="h-10 flex-1"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="secondary"
+              className="h-10"
+              loading={createTag.isPending}
+              disabled={!newTagName.trim()}
+            >
+              <Plus size={15} /> Add
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Tag color">
+            {TAG_SWATCHES.map((color) => (
+              <button
+                key={color}
+                type="button"
+                role="radio"
+                aria-checked={newTagColor.toLowerCase() === color.toLowerCase()}
+                aria-label={`Color ${color}`}
+                onClick={() => setNewTagColor(color)}
+                className={cn(
+                  "h-6 w-6 rounded-full ring-offset-2 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                  newTagColor.toLowerCase() === color.toLowerCase() && "ring-2 ring-foreground/70",
+                )}
+                style={{ backgroundColor: color }}
+              />
+            ))}
+            <label className="relative ml-1 grid h-6 w-6 cursor-pointer place-items-center overflow-hidden rounded-full border border-dashed border-border text-muted-foreground hover:border-brand-300">
+              <Plus size={12} />
+              <input
+                type="color"
+                value={newTagColor}
+                onChange={(e) => setNewTagColor(e.target.value)}
+                aria-label="Custom tag color"
+                className="absolute inset-0 cursor-pointer opacity-0"
+              />
+            </label>
+          </div>
+        </form>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -957,6 +1171,11 @@ export function ManageGroupsModal({
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>(assignedGroupIds);
 
+  useEffect(() => {
+    if (isOpen) setSelected(assignedGroupIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
   const groupsQuery = useQuery({
     queryKey: ["groups"],
     queryFn: () => api.get<{ data: GroupItem[] }>("/groups"),
@@ -966,96 +1185,84 @@ export function ManageGroupsModal({
   const saveMutation = useMutation({
     mutationFn: () => api.patch(`/contacts/${contactId}`, { groupIds: selected }),
     onSuccess: () => {
-      toast.success("Contact groups updated");
+      toast.success("Groups updated");
       void queryClient.invalidateQueries({ queryKey: ["contact", contactId] });
       void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      void queryClient.invalidateQueries({ queryKey: ["groups"] });
       onClose();
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to update groups");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to update groups")),
   });
-
-  if (!isOpen) return null;
 
   const allGroups = groupsQuery.data?.data ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <Users size={18} className="text-[#00C268]" />
-            <h3 className="text-base font-bold">Assign Groups</h3>
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={Users}
+      title="Groups"
+      description="Add this contact to groups used for broadcasts."
+      footer={
+        <>
+          <span className="mr-auto text-xs text-muted-foreground">{selected.length} selected</span>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+            Save groups
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        {groupsQuery.isLoading ? (
+          <ListSkeleton rows={3} />
+        ) : allGroups.length === 0 ? (
+          <div className="rounded-2xl border border-dashed p-6 text-center text-xs text-muted-foreground">
+            No groups created yet.{" "}
+            <Link href="/manage/groups" className="font-semibold text-primary hover:underline">
+              Create a group
+            </Link>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-          {groupsQuery.isLoading ? (
-            <div className="grid h-28 place-items-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            </div>
-          ) : allGroups.length === 0 ? (
-            <p className="p-4 text-center text-xs text-muted-foreground">No groups created yet.</p>
-          ) : (
-            allGroups.map((group) => {
-              const isChecked = selected.includes(group.id);
-              return (
-                <button
-                  key={group.id}
-                  type="button"
+        ) : (
+          allGroups.map((group, i) => {
+            const isChecked = selected.includes(group.id);
+            return (
+              <motion.div
+                key={group.id}
+                initial={i < 12 ? { opacity: 0, y: 8 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.28, ease, delay: Math.min(i, 12) * 0.03 }}
+              >
+                <SelectRow
+                  selected={isChecked}
                   onClick={() =>
                     setSelected((prev) =>
                       isChecked ? prev.filter((id) => id !== group.id) : [...prev, group.id],
                     )
                   }
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-xl border p-3 text-left transition-colors",
-                    isChecked ? "border-primary bg-primary/5" : "hover:bg-muted/60",
-                  )}
                 >
-                  <div>
-                    <p className="text-sm font-semibold">{group.name}</p>
-                    {group.description && (
-                      <p className="text-xs text-muted-foreground">{group.description}</p>
-                    )}
-                  </div>
-                  {isChecked && <Check size={16} className="text-primary" />}
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            loading={saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-            className="bg-[#00C268] hover:bg-[#00B05D] text-white"
-          >
-            Save Groups
-          </Button>
-        </div>
+                  <p className="text-sm font-semibold">{group.name}</p>
+                  {group.description && (
+                    <p className="line-clamp-1 text-xs text-muted-foreground">{group.description}</p>
+                  )}
+                </SelectRow>
+              </motion.div>
+            );
+          })
+        )}
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
 // --------------------------------------------------------------------------------
 // 7. Create Support Ticket Modal
 // --------------------------------------------------------------------------------
+
+const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+type Priority = (typeof PRIORITIES)[number];
 
 export function CreateTicketModal({
   contactName,
@@ -1068,8 +1275,17 @@ export function CreateTicketModal({
 }) {
   const queryClient = useQueryClient();
   const [subject, setSubject] = useState("");
-  const [priority, setPriority] = useState<"low" | "medium" | "high" | "urgent">("medium");
+  const [priority, setPriority] = useState<Priority>("medium");
   const [message, setMessage] = useState("");
+  const [touched, setTouched] = useState(false);
+  const subjectId = useId();
+  const messageId = useId();
+
+  // Mirrors supportTicketSchema: subject 4–200 chars, message 4–5000 chars.
+  const subjectError =
+    subject.trim().length < 4 ? "Subject needs at least 4 characters" : null;
+  const messageError =
+    message.trim().length < 4 ? "Description needs at least 4 characters" : null;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -1084,97 +1300,119 @@ export function CreateTicketModal({
       onClose();
       setSubject("");
       setMessage("");
+      setPriority("medium");
+      setTouched(false);
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to create ticket");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to create ticket")),
   });
 
-  if (!isOpen) return null;
+  const submit = () => {
+    setTouched(true);
+    if (!subjectError && !messageError) createMutation.mutate();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="flex items-center gap-2">
-            <Ticket size={18} className="text-[#00C268]" />
-            <h3 className="text-base font-bold">Raise Support Ticket</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-bold text-muted-foreground">Subject</label>
-            <Input
-              placeholder={`e.g. Issue reported by ${contactName ?? "customer"}`}
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="mt-1 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-muted-foreground">Priority</label>
-            <div className="mt-1 flex gap-2">
-              {(["low", "medium", "high", "urgent"] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={cn(
-                    "flex-1 rounded-lg py-1.5 text-xs font-bold capitalize transition-colors border",
-                    priority === p
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-muted-foreground">Initial Description / Note</label>
-            <Textarea
-              placeholder="Describe the issue or user complaint..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              className="mt-1 text-xs min-h-[90px]"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={Ticket}
+      title="Raise a support ticket"
+      description="Our support team will get back to you on the Support Tickets page."
+      footer={
+        <>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            loading={createMutation.isPending}
-            disabled={!subject.trim() || !message.trim()}
-            onClick={() => createMutation.mutate()}
-            className="bg-[#00C268] hover:bg-[#00B05D] text-white"
-          >
-            Create Ticket
+          <Button size="sm" loading={createMutation.isPending} onClick={submit}>
+            Create ticket
           </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <div>
+          <FieldLabel htmlFor={subjectId} hint={`${subject.trim().length}/200`}>
+            Subject
+          </FieldLabel>
+          <Input
+            id={subjectId}
+            maxLength={200}
+            placeholder={`e.g. Issue reported by ${contactName ?? "a customer"}`}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            aria-invalid={(touched && !!subjectError) || undefined}
+          />
+          {touched && subjectError && (
+            <p role="alert" className="mt-1 text-xs font-medium text-destructive">
+              {subjectError}
+            </p>
+          )}
         </div>
-      </div>
-    </div>
+
+        <div>
+          <p className="mb-1.5 text-sm font-semibold text-foreground/90" id={`${subjectId}-priority`}>
+            Priority
+          </p>
+          <SegmentedTabs
+            layoutId="ticket-priority"
+            value={priority}
+            onChange={setPriority}
+            tabs={PRIORITIES.map((p) => ({ value: p, label: <span className="capitalize">{p}</span> }))}
+            className="grid w-full grid-cols-4 [&_button]:px-1 [&_button]:text-xs"
+          />
+        </div>
+
+        <div>
+          <FieldLabel htmlFor={messageId} hint={`${message.trim().length}/5000`}>
+            Description
+          </FieldLabel>
+          <Textarea
+            id={messageId}
+            maxLength={5000}
+            placeholder="Describe the issue, steps to reproduce, or what the customer reported…"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            className="min-h-[110px]"
+            aria-invalid={(touched && !!messageError) || undefined}
+          />
+          {touched && messageError && (
+            <p role="alert" className="mt-1 text-xs font-medium text-destructive">
+              {messageError}
+            </p>
+          )}
+        </div>
+      </form>
+    </ModalShell>
   );
 }
 
 // --------------------------------------------------------------------------------
 // 8. Media Attachment Modal
 // --------------------------------------------------------------------------------
+
+export type MediaKind = "image" | "video" | "audio" | "document";
+
+const MEDIA_KINDS: { value: MediaKind; label: string; icon: typeof ImageIcon; example: string }[] = [
+  { value: "image", label: "Image", icon: ImageIcon, example: "https://example.com/photo.jpg" },
+  { value: "video", label: "Video", icon: Film, example: "https://example.com/clip.mp4" },
+  { value: "document", label: "Document", icon: FileText, example: "https://example.com/invoice.pdf" },
+  { value: "audio", label: "Audio", icon: Music, example: "https://example.com/note.mp3" },
+];
+
+function isHttpUrl(value: string) {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 export function MediaAttachmentModal({
   conversationId,
@@ -1183,93 +1421,163 @@ export function MediaAttachmentModal({
   onClose,
 }: {
   conversationId: string;
-  type: "image" | "document" | "audio";
+  type: MediaKind;
   isOpen: boolean;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [kind, setKind] = useState<MediaKind>(type);
   const [mediaUrl, setMediaUrl] = useState("");
   const [caption, setCaption] = useState("");
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const urlId = useId();
+  const captionId = useId();
+
+  useEffect(() => {
+    if (isOpen) setKind(type);
+  }, [isOpen, type]);
+
+  useEffect(() => setPreviewFailed(false), [mediaUrl]);
+
+  const trimmedUrl = mediaUrl.trim();
+  const urlValid = isHttpUrl(trimmedUrl);
+  // WhatsApp audio messages don't support captions.
+  const supportsCaption = kind !== "audio";
 
   const sendMedia = useMutation({
     mutationFn: () =>
       api.post(`/conversations/${conversationId}/messages`, {
         type: "media",
-        mediaType: type,
-        mediaUrl: mediaUrl.trim(),
-        caption: caption.trim() || undefined,
+        mediaType: kind,
+        mediaUrl: trimmedUrl,
+        caption: supportsCaption ? caption.trim() || undefined : undefined,
       }),
     onSuccess: () => {
-      toast.success("Media message sent");
+      toast.success(`${kind[0]!.toUpperCase()}${kind.slice(1)} sent`);
       void queryClient.invalidateQueries({ queryKey: ["messages", conversationId] });
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
       onClose();
       setMediaUrl("");
       setCaption("");
     },
-    onError: (err) => {
-      toast.error(err instanceof ApiClientError ? err.message : "Failed to send media");
-    },
+    onError: (err) => toast.error(errorMessage(err, "Failed to send media")),
   });
 
-  if (!isOpen) return null;
+  const meta = MEDIA_KINDS.find((m) => m.value === kind) ?? MEDIA_KINDS[0]!;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border bg-card p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-base font-bold capitalize">Send {type}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-bold text-muted-foreground">
-              {type === "image" ? "Image URL" : type === "document" ? "Document URL" : "Audio URL"}
-            </label>
-            <Input
-              placeholder="https://example.com/file.jpg"
-              value={mediaUrl}
-              onChange={(e) => setMediaUrl(e.target.value)}
-              className="mt-1 text-sm font-mono"
-            />
-          </div>
-
-          {type !== "audio" && (
-            <div>
-              <label className="text-xs font-bold text-muted-foreground">Caption (Optional)</label>
-              <Input
-                placeholder="Enter caption..."
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                className="mt-1 text-sm"
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      icon={Link2}
+      title="Send media"
+      description="Paste a public link to the file. WhatsApp downloads it and delivers it to the customer."
+      footer={
+        <>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
           <Button
             size="sm"
             loading={sendMedia.isPending}
-            disabled={!mediaUrl.trim()}
+            disabled={!urlValid}
             onClick={() => sendMedia.mutate()}
-            className="bg-[#00C268] hover:bg-[#00B05D] text-white"
           >
-            Send {type}
+            Send {meta.label.toLowerCase()}
           </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (urlValid) sendMedia.mutate();
+        }}
+      >
+        <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Media type">
+          {MEDIA_KINDS.map(({ value, label, icon: Icon }) => {
+            const active = kind === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setKind(value)}
+                className={cn(
+                  "relative flex flex-col items-center gap-1.5 rounded-2xl border p-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  active ? "border-transparent text-white" : "border-border bg-white text-muted-foreground hover:border-brand-200 hover:text-foreground",
+                )}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="media-kind-indicator"
+                    className="absolute inset-0 rounded-2xl bg-brand-gradient shadow-glow"
+                    transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                  />
+                )}
+                <Icon size={18} className="relative" />
+                <span className="relative">{label}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
-    </div>
+
+        <div>
+          <FieldLabel htmlFor={urlId}>{meta.label} URL</FieldLabel>
+          <Input
+            id={urlId}
+            type="url"
+            inputMode="url"
+            placeholder={meta.example}
+            value={mediaUrl}
+            onChange={(e) => setMediaUrl(e.target.value)}
+            aria-invalid={(trimmedUrl.length > 0 && !urlValid) || undefined}
+          />
+          {trimmedUrl.length > 0 && !urlValid && (
+            <p role="alert" className="mt-1 text-xs font-medium text-destructive">
+              Enter a full http(s) link
+            </p>
+          )}
+        </div>
+
+        <AnimatePresence initial={false}>
+          {kind === "image" && urlValid && !previewFailed && (
+            <motion.div
+              key="preview"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease }}
+              className="overflow-hidden rounded-2xl border border-border/70 bg-muted/40"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={trimmedUrl}
+                alt="Preview of the image to send"
+                onError={() => setPreviewFailed(true)}
+                className="max-h-48 w-full object-contain"
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {supportsCaption && (
+          <div>
+            <FieldLabel htmlFor={captionId} hint="Optional">
+              Caption
+            </FieldLabel>
+            <Input
+              id={captionId}
+              maxLength={1024}
+              placeholder="Add a caption…"
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+            />
+          </div>
+        )}
+      </form>
+    </ModalShell>
   );
 }

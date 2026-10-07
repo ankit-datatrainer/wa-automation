@@ -1,67 +1,78 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Bot,
   Building2,
-  Calendar,
+  CalendarClock,
   CreditCard,
-  History,
+  ExternalLink,
+  FileText,
   MessageSquare,
   Phone,
   Send,
   ShieldAlert,
   ShieldCheck,
-  User,
   Users,
   Wallet,
-  X,
-  Zap,
+  Workflow,
+  type LucideIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/states";
+import { AnimatedNumber, AnimatePresence, SegmentedTabs, motion, ease } from "@/components/motion";
+import { Badge, statusTone } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { ErrorState, Skeleton } from "@/components/ui/states";
 import { api } from "@/lib/api-client";
-import { formatCurrency, initials } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
+import { Sheet } from "../_components/overlay";
+import { Avatar, relation } from "../_components/ui";
+
+type PlanRelation = { id: string; name: string; price: number; currency: string; billing_cycle: string };
+type UserRelation = {
+  id: string;
+  name: string | null;
+  email: string;
+  phone: string | null;
+  country: string | null;
+};
+
+export interface OrgDetailsOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  wallet_balance: number;
+  currency: string;
+  trial_ends_at: string | null;
+  is_demo: boolean;
+  is_suspended: boolean;
+  suspended_reason: string | null;
+  created_at: string;
+}
 
 interface OrgDetailsResponse {
-  organization: {
-    id: string;
-    name: string;
-    slug: string;
-    plan: string;
-    wallet_balance: number;
-    currency: string;
-    trial_ends_at: string | null;
-    is_demo: boolean;
-    is_suspended: boolean;
-    suspended_reason: string | null;
-    created_at: string;
-  };
+  organization: OrgDetailsOrganization;
   members: {
     id: string;
     role: string;
     is_online: boolean;
     created_at: string;
-    users: {
-      id: string;
-      name: string | null;
-      email: string;
-      phone: string | null;
-      country: string | null;
-    } | null;
+    users: UserRelation | UserRelation[] | null;
   }[];
   waba: {
     id: string;
     waba_id: string;
     phone_number_id: string;
     display_phone: string;
-    verified_name: string;
-    quality_rating: string;
-    messaging_tier: string;
+    verified_name: string | null;
+    quality_rating: string | null;
+    messaging_tier: string | null;
     status: string;
-    last_synced_at: string;
+    last_synced_at: string | null;
   } | null;
   counts: {
     contacts: number;
@@ -79,13 +90,7 @@ interface OrgDetailsResponse {
     ends_at: string;
     cancelled_at: string | null;
     notes: string | null;
-    plans: {
-      id: string;
-      name: string;
-      price: number;
-      currency: string;
-      billing_cycle: string;
-    } | null;
+    plans: PlanRelation | PlanRelation[] | null;
   }[];
   walletTransactions: {
     id: string;
@@ -101,10 +106,16 @@ interface OrgDetailsResponse {
 interface OrgDetailsDrawerProps {
   organizationId: string;
   onClose: () => void;
-  onOpenWallet: (org: { id: string; name: string; wallet_balance: number; currency: string }) => void;
-  onOpenPlan: (org: { id: string; name: string }) => void;
-  onToggleSuspend: (org: { id: string; is_suspended: boolean }) => void;
+  /** When omitted (e.g. opened from the WABA page) the action toolbar links to Organizations instead. */
+  onOpenWallet?: (org: OrgDetailsOrganization) => void;
+  onOpenPlan?: (org: OrgDetailsOrganization) => void;
+  onToggleSuspend?: (org: OrgDetailsOrganization) => void;
 }
+
+type Tab = "overview" | "waba" | "members" | "billing";
+
+const qualityTone = (q?: string | null) =>
+  q === "high" ? "success" : q === "medium" ? "warning" : q === "low" ? "danger" : "neutral";
 
 export function OrgDetailsDrawer({
   organizationId,
@@ -113,7 +124,7 @@ export function OrgDetailsDrawer({
   onOpenPlan,
   onToggleSuspend,
 }: OrgDetailsDrawerProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "members" | "waba" | "billing">("overview");
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
 
   const details = useQuery({
     queryKey: ["platform", "organization", organizationId, "details"],
@@ -123,470 +134,379 @@ export function OrgDetailsDrawer({
   const data = details.data;
   const org = data?.organization;
   const waba = data?.waba;
-
-  const qualityBadgeTone = (q?: string) => {
-    if (q === "high") return "success";
-    if (q === "medium") return "warning";
-    if (q === "low") return "danger";
-    return "neutral";
-  };
+  const hasActions = !!(onOpenWallet || onOpenPlan || onToggleSuspend);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        className="fixed inset-0"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      <div className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right duration-300">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Building2 size={20} />
-            </span>
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-bold">
-                {org?.name ?? "Loading organization..."}
-              </h2>
-              <p className="truncate font-mono text-xs text-muted-foreground">
-                {org?.slug ?? organizationId}
-              </p>
-            </div>
+    <Sheet
+      onClose={onClose}
+      icon={Building2}
+      size="xl"
+      title={org?.name ?? "Loading organization…"}
+      description={<span className="font-mono text-xs">{org?.slug ?? organizationId}</span>}
+      bodyClassName="p-0 sm:p-0"
+    >
+      {/* Status + actions */}
+      {org && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-brand-50/30 px-5 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="brand" className="capitalize">
+              {org.plan} plan
+            </Badge>
+            {org.is_demo && <Badge tone="info">Demo</Badge>}
+            {org.is_suspended ? (
+              <Badge tone="danger">
+                <ShieldAlert size={12} />
+                Suspended
+              </Badge>
+            ) : (
+              <Badge tone="success">
+                <ShieldCheck size={12} />
+                Active
+              </Badge>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close panel"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-          >
-            <X size={18} />
-          </button>
-        </div>
 
-        {/* Action Toolbar */}
-        {org && (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-6 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="capitalize font-semibold">{org.plan} Plan</Badge>
-              {org.is_demo && <Badge tone="info">Demo Account</Badge>}
-              {org.is_suspended ? (
-                <Badge tone="danger">
-                  <ShieldAlert size={12} />
-                  Suspended
-                </Badge>
-              ) : (
-                <Badge tone="success">
-                  <ShieldCheck size={12} />
-                  Active
-                </Badge>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onOpenWallet(org)}
-                className="gap-1.5"
-              >
-                <Wallet size={14} />
-                Wallet
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onOpenPlan(org)}
-                className="gap-1.5"
-              >
-                <CreditCard size={14} />
-                Plan
-              </Button>
-              <Button
-                size="sm"
-                variant={org.is_suspended ? "outline" : "destructive"}
-                onClick={() => onToggleSuspend(org)}
-              >
-                {org.is_suspended ? "Restore" : "Suspend"}
-              </Button>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {hasActions ? (
+              <>
+                {onOpenWallet && (
+                  <Button size="sm" variant="outline" onClick={() => onOpenWallet(org)}>
+                    <Wallet size={14} />
+                    Wallet
+                  </Button>
+                )}
+                {onOpenPlan && (
+                  <Button size="sm" variant="outline" onClick={() => onOpenPlan(org)}>
+                    <CreditCard size={14} />
+                    Plan
+                  </Button>
+                )}
+                {onToggleSuspend && (
+                  <Button
+                    size="sm"
+                    variant={org.is_suspended ? "outline" : "destructive"}
+                    onClick={() => onToggleSuspend(org)}
+                  >
+                    {org.is_suspended ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                    {org.is_suspended ? "Restore" : "Suspend"}
+                  </Button>
+                )}
+              </>
+            ) : (
+              <Link href="/platform/organizations" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                <ExternalLink size={14} />
+                Manage in Organizations
+              </Link>
+            )}
           </div>
-        )}
-
-        {/* Tab Navigation */}
-        <div className="flex border-b px-6">
-          <button
-            type="button"
-            onClick={() => setActiveTab("overview")}
-            className={`border-b-2 py-3 text-sm font-semibold transition-colors mr-6 ${
-              activeTab === "overview"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Overview & Telemetry
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("waba")}
-            className={`border-b-2 py-3 text-sm font-semibold transition-colors mr-6 ${
-              activeTab === "waba"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            WhatsApp (WABA)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("members")}
-            className={`border-b-2 py-3 text-sm font-semibold transition-colors mr-6 ${
-              activeTab === "members"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Team ({data?.members.length ?? 0})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("billing")}
-            className={`border-b-2 py-3 text-sm font-semibold transition-colors ${
-              activeTab === "billing"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Billing & History
-          </button>
         </div>
+      )}
 
-        {/* Body Content */}
-        <div className="scrollbar-thin flex-1 overflow-y-auto p-6">
-          {details.isLoading ? (
-            <div className="space-y-4">
-              <Skeleton className="h-28" />
-              <Skeleton className="h-44" />
-              <Skeleton className="h-44" />
-            </div>
-          ) : !data || !org ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              Could not load organization details.
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Tab 1: Overview */}
+      {/* Tabs */}
+      <div className="scrollbar-none overflow-x-auto border-b px-5 py-3 sm:px-6">
+        <SegmentedTabs<Tab>
+          layoutId="org-details-tabs"
+          value={activeTab}
+          onChange={setActiveTab}
+          tabs={[
+            { value: "overview", label: "Overview" },
+            { value: "waba", label: "WhatsApp" },
+            { value: "members", label: `Team${data ? ` (${data.members.length})` : ""}` },
+            { value: "billing", label: "Billing" },
+          ]}
+        />
+      </div>
+
+      <div className="p-5 sm:p-6">
+        {details.isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-28" />
+            <Skeleton className="h-44" />
+            <Skeleton className="h-32" />
+          </div>
+        ) : details.isError || !data || !org ? (
+          <ErrorState message="Could not load organization details." onRetry={() => void details.refetch()} />
+        ) : (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.25, ease }}
+              className="space-y-6"
+            >
               {activeTab === "overview" && (
                 <>
-                  {/* Financial & Plan Stat Cards */}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Card className="p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Wallet Balance
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="relative overflow-hidden rounded-2xl bg-brand-gradient p-5 text-white shadow-glow">
+                      <div aria-hidden className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/15 blur-2xl" />
+                      <p className="relative text-xs font-semibold uppercase tracking-wider text-white/75">
+                        Wallet balance
                       </p>
-                      <p className="mt-1 text-2xl font-black text-[#00C268]">
-                        {formatCurrency(Number(org.wallet_balance), org.currency)}
+                      <p className="relative mt-1 font-display text-2xl font-bold">
+                        <AnimatedNumber
+                          value={Number(org.wallet_balance)}
+                          format={(n) => formatCurrency(n, org.currency)}
+                        />
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Used for per-message Cloud API charges
-                      </p>
-                    </Card>
+                      <p className="relative mt-1 text-xs text-white/80">Used for per-message Cloud API charges</p>
+                    </div>
 
-                    <Card className="p-4">
+                    <div className="rounded-2xl border bg-white p-5 shadow-soft">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Subscription / Trial Status
+                        Plan / trial
                       </p>
-                      <p className="mt-1 text-xl font-bold capitalize">
-                        {org.plan} Tier
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 font-display text-xl font-bold capitalize">{org.plan}</p>
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <CalendarClock size={13} />
                         {org.trial_ends_at
-                          ? `Expires: ${new Date(org.trial_ends_at).toLocaleDateString()}`
-                          : "No expiration set"}
+                          ? `Ends ${new Date(org.trial_ends_at).toLocaleDateString()}`
+                          : "No expiry set"}
                       </p>
-                    </Card>
-                  </div>
-
-                  {/* Resource Usage Counters */}
-                  <div>
-                    <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-muted-foreground">
-                      Resource Usage
-                    </h3>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Users size={16} />
-                          <span className="text-xs font-semibold">Contacts</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.contacts.toLocaleString()}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Send size={16} />
-                          <span className="text-xs font-semibold">Campaigns</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.campaigns.toLocaleString()}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <MessageSquare size={16} />
-                          <span className="text-xs font-semibold">Templates</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.templates.toLocaleString()}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Zap size={16} />
-                          <span className="text-xs font-semibold">Flows</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.flows.toLocaleString()}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Zap size={16} />
-                          <span className="text-xs font-semibold">Chatbots</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.chatbots.toLocaleString()}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border bg-card p-3.5">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <History size={16} />
-                          <span className="text-xs font-semibold">Messages</span>
-                        </div>
-                        <p className="mt-2 text-xl font-bold">
-                          {data.counts.messages.toLocaleString()}
-                        </p>
-                      </div>
                     </div>
                   </div>
 
-                  {/* General Meta Information */}
-                  <Card className="p-4 space-y-3">
-                    <h3 className="text-sm font-bold">Organization Metadata</h3>
-                    <div className="grid gap-2 text-xs sm:grid-cols-2">
-                      <div>
-                        <span className="text-muted-foreground">Tenant ID: </span>
-                        <span className="font-mono">{org.id}</span>
+                  <div>
+                    <h3 className="mb-3 font-display text-base font-semibold">Resource usage</h3>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <UsageTile icon={Users} label="Contacts" value={data.counts.contacts} />
+                      <UsageTile icon={Send} label="Campaigns" value={data.counts.campaigns} />
+                      <UsageTile icon={FileText} label="Templates" value={data.counts.templates} />
+                      <UsageTile icon={Workflow} label="Flows" value={data.counts.flows} />
+                      <UsageTile icon={Bot} label="Chatbots" value={data.counts.chatbots} />
+                      <UsageTile icon={MessageSquare} label="Messages" value={data.counts.messages} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-white p-4">
+                    <h3 className="mb-3 text-sm font-semibold">Metadata</h3>
+                    <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">Tenant ID</dt>
+                        <dd className="truncate font-mono">{org.id}</dd>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Created: </span>
-                        <span>{new Date(org.created_at).toLocaleString()}</span>
+                        <dt className="text-muted-foreground">Created</dt>
+                        <dd>{new Date(org.created_at).toLocaleString()}</dd>
                       </div>
                       {org.suspended_reason && (
-                        <div className="sm:col-span-2 text-destructive">
-                          <span className="font-semibold">Suspension Reason: </span>
-                          <span>{org.suspended_reason}</span>
+                        <div className="rounded-xl bg-rose-50 p-3 text-rose-700 sm:col-span-2">
+                          <dt className="font-semibold">Suspension reason</dt>
+                          <dd>{org.suspended_reason}</dd>
                         </div>
                       )}
-                    </div>
-                  </Card>
+                    </dl>
+                  </div>
                 </>
               )}
 
-              {/* Tab 2: WhatsApp WABA */}
-              {activeTab === "waba" && (
-                <div className="space-y-4">
-                  {waba ? (
-                    <>
-                      <Card className="p-5 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-primary-foreground">
-                              <Phone size={20} />
-                            </span>
-                            <div>
-                              <p className="text-lg font-bold">{waba.display_phone}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {waba.verified_name || "Unverified Name"}
-                              </p>
-                            </div>
-                          </div>
-                          <Badge
-                            tone={waba.status === "connected" ? "success" : "danger"}
-                          >
-                            {waba.status}
-                          </Badge>
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2 border-t pt-4">
-                          <div>
-                            <p className="text-xs text-muted-foreground font-semibold">Quality Rating</p>
-                            <div className="mt-1">
-                              <Badge tone={qualityBadgeTone(waba.quality_rating)}>
-                                {waba.quality_rating?.toUpperCase() || "UNKNOWN"}
-                              </Badge>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-muted-foreground font-semibold">Messaging Tier</p>
-                            <p className="mt-1 text-sm font-bold">{waba.messaging_tier || "TIER_1K"}</p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-muted-foreground font-semibold">WABA ID</p>
-                            <p className="mt-1 font-mono text-xs text-muted-foreground">{waba.waba_id}</p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs text-muted-foreground font-semibold">Phone Number ID</p>
-                            <p className="mt-1 font-mono text-xs text-muted-foreground">{waba.phone_number_id}</p>
-                          </div>
-                        </div>
-
-                        {waba.last_synced_at && (
-                          <p className="text-xs text-muted-foreground border-t pt-3">
-                            Last synced with Meta: {new Date(waba.last_synced_at).toLocaleString()}
-                          </p>
-                        )}
-                      </Card>
-                    </>
-                  ) : (
-                    <Card className="p-8 text-center">
-                      <Phone size={36} className="mx-auto text-muted-foreground opacity-40 mb-3" />
-                      <h4 className="font-bold">No WhatsApp Account Connected</h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        This organization has not yet connected a Meta WhatsApp Cloud API number.
-                      </p>
-                    </Card>
-                  )}
-                </div>
-              )}
-
-              {/* Tab 3: Members */}
-              {activeTab === "members" && (
-                <div className="space-y-3">
-                  {data.members.map((member) => (
-                    <Card key={member.id} className="flex items-center justify-between p-3.5">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                          {initials(member.users?.name ?? member.users?.email)}
-                          {member.is_online && (
-                            <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
-                          )}
+              {activeTab === "waba" &&
+                (waba ? (
+                  <div className="space-y-4 rounded-2xl border bg-white p-5 shadow-soft">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+                          <Phone size={20} />
                         </span>
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-sm">
-                            {member.users?.name ?? "Unnamed User"}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {member.users?.email}
-                          </p>
+                        <div>
+                          <p className="font-display text-lg font-bold">{waba.display_phone || "—"}</p>
+                          <p className="text-xs text-muted-foreground">{waba.verified_name || "Unverified name"}</p>
                         </div>
                       </div>
-
-                      <Badge className="capitalize font-semibold text-xs">
-                        {member.role}
+                      <Badge tone={statusTone(waba.status)} className="capitalize">
+                        {waba.status}
                       </Badge>
-                    </Card>
-                  ))}
-                </div>
-              )}
+                    </div>
 
-              {/* Tab 4: Billing & Subscriptions */}
-              {activeTab === "billing" && (
-                <div className="space-y-6">
-                  {/* Active Subscriptions */}
-                  <div>
-                    <h3 className="mb-3 text-sm font-bold">Subscription Ledger</h3>
-                    {data.subscriptions.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No subscription history recorded.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {data.subscriptions.map((sub) => (
-                          <Card key={sub.id} className="p-3.5 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <p className="font-bold text-sm">
-                                {sub.plans?.name ?? "Custom"} Plan
-                                <span className="ml-2 text-xs font-normal text-muted-foreground">
-                                  ({sub.plans?.billing_cycle || "monthly"})
-                                </span>
-                              </p>
-                              <Badge
-                                tone={sub.status === "active" ? "success" : "neutral"}
-                              >
-                                {sub.status}
-                              </Badge>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                              <div>
-                                <span>Starts: </span>
-                                <span>{new Date(sub.starts_at).toLocaleDateString()}</span>
-                              </div>
-                              <div>
-                                <span>Ends: </span>
-                                <span>{new Date(sub.ends_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                            {sub.notes && (
-                              <p className="text-xs italic text-muted-foreground border-t pt-1.5">
-                                Note: {sub.notes}
-                              </p>
-                            )}
-                          </Card>
-                        ))}
+                    <dl className="grid grid-cols-1 gap-4 border-t pt-4 text-sm sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs font-semibold text-muted-foreground">Quality rating</dt>
+                        <dd className="mt-1">
+                          <Badge tone={qualityTone(waba.quality_rating)}>
+                            {waba.quality_rating?.toUpperCase() || "UNKNOWN"}
+                          </Badge>
+                        </dd>
                       </div>
+                      <div>
+                        <dt className="text-xs font-semibold text-muted-foreground">Messaging tier</dt>
+                        <dd className="mt-1 font-semibold">{waba.messaging_tier || "—"}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-xs font-semibold text-muted-foreground">WABA ID</dt>
+                        <dd className="mt-1 truncate font-mono text-xs">{waba.waba_id}</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-xs font-semibold text-muted-foreground">Phone number ID</dt>
+                        <dd className="mt-1 truncate font-mono text-xs">{waba.phone_number_id}</dd>
+                      </div>
+                    </dl>
+
+                    {waba.last_synced_at && (
+                      <p className="border-t pt-3 text-xs text-muted-foreground">
+                        Last synced with Meta {new Date(waba.last_synced_at).toLocaleString()}
+                      </p>
                     )}
                   </div>
+                ) : (
+                  <EmptyPanel
+                    icon={Phone}
+                    title="No WhatsApp number connected"
+                    description="This organization has not connected a Meta WhatsApp Cloud API number yet."
+                  />
+                ))}
 
-                  {/* Recent Wallet Adjustments */}
-                  <div>
-                    <h3 className="mb-3 text-sm font-bold">Recent Wallet Transactions</h3>
-                    {data.walletTransactions.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No wallet transactions found.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {data.walletTransactions.map((tx) => (
-                          <div
-                            key={tx.id}
-                            className="flex items-center justify-between rounded-lg border p-3 text-xs"
-                          >
-                            <div>
-                              <p className="font-semibold">{tx.description || "Wallet adjustment"}</p>
-                              <p className="text-muted-foreground">
-                                {new Date(tx.created_at).toLocaleString()}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p
-                                className={`font-bold ${
-                                  tx.type === "credit" ? "text-emerald-600" : "text-rose-600"
-                                }`}
-                              >
-                                {tx.type === "credit" ? "+" : "-"}
-                                {formatCurrency(Number(tx.amount))}
-                              </p>
-                              <p className="text-muted-foreground">
-                                Bal: {formatCurrency(Number(tx.balance_after))}
-                              </p>
+              {activeTab === "members" &&
+                (data.members.length === 0 ? (
+                  <EmptyPanel icon={Users} title="No members" description="Nobody belongs to this organization." />
+                ) : (
+                  <ul className="space-y-2">
+                    {data.members.map((member, i) => {
+                      const user = relation<UserRelation>(member.users);
+                      return (
+                        <motion.li
+                          key={member.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.3, ease, delay: Math.min(i, 15) * 0.03 }}
+                          className="flex items-center justify-between gap-3 rounded-2xl border bg-white p-3.5 transition hover:border-brand-200 hover:shadow-soft"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Avatar name={user?.name ?? user?.email} online={member.is_online} />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold">{user?.name ?? "Unnamed user"}</p>
+                              <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
                             </div>
                           </div>
-                        ))}
-                      </div>
+                          <Badge tone={member.role === "owner" ? "brand" : "neutral"} className="capitalize">
+                            {member.role}
+                          </Badge>
+                        </motion.li>
+                      );
+                    })}
+                  </ul>
+                ))}
+
+              {activeTab === "billing" && (
+                <>
+                  <div>
+                    <h3 className="mb-3 font-display text-base font-semibold">Subscriptions</h3>
+                    {data.subscriptions.length === 0 ? (
+                      <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                        No subscription history recorded.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {data.subscriptions.map((sub) => {
+                          const plan = relation<PlanRelation>(sub.plans);
+                          return (
+                            <li key={sub.id} className="rounded-2xl border bg-white p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold">
+                                  {plan?.name ?? "Custom"}
+                                  <span className="ml-2 text-xs font-normal capitalize text-muted-foreground">
+                                    {plan?.billing_cycle ?? "monthly"}
+                                  </span>
+                                </p>
+                                <Badge tone={sub.status === "active" ? "success" : "neutral"} className="capitalize">
+                                  {sub.status}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {new Date(sub.starts_at).toLocaleDateString()} –{" "}
+                                {new Date(sub.ends_at).toLocaleDateString()}
+                              </p>
+                              {sub.notes && (
+                                <p className="mt-2 border-t pt-2 text-xs italic text-muted-foreground">{sub.notes}</p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     )}
                   </div>
-                </div>
+
+                  <div>
+                    <h3 className="mb-3 font-display text-base font-semibold">Recent wallet transactions</h3>
+                    {data.walletTransactions.length === 0 ? (
+                      <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                        No wallet transactions yet.
+                      </p>
+                    ) : (
+                      <ul className="divide-y rounded-2xl border bg-white">
+                        {data.walletTransactions.map((tx) => {
+                          const credit = tx.type === "credit";
+                          return (
+                            <li key={tx.id} className="flex items-center justify-between gap-3 p-3.5 text-sm">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <span
+                                  className={cn(
+                                    "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+                                    credit ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600",
+                                  )}
+                                >
+                                  {credit ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">{tx.description || "Wallet adjustment"}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {new Date(tx.created_at).toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className={cn("font-bold", credit ? "text-emerald-600" : "text-rose-600")}>
+                                  {credit ? "+" : "−"}
+                                  {formatCurrency(Number(tx.amount), org.currency)}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Bal {formatCurrency(Number(tx.balance_after), org.currency)}
+                                </p>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </>
               )}
-            </div>
-          )}
-        </div>
+            </motion.div>
+          </AnimatePresence>
+        )}
       </div>
+    </Sheet>
+  );
+}
+
+function UsageTile({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
+  return (
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 320, damping: 24 }}
+      className="rounded-2xl border bg-white p-4 transition-shadow hover:shadow-soft"
+    >
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-50 text-primary">
+          <Icon size={14} />
+        </span>
+        <span className="text-xs font-semibold">{label}</span>
+      </div>
+      <p className="mt-2 font-display text-xl font-bold">
+        <AnimatedNumber value={value} />
+      </p>
+    </motion.div>
+  );
+}
+
+function EmptyPanel({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-brand-50/30 p-10 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-primary shadow-soft">
+        <Icon size={22} />
+      </span>
+      <p className="font-semibold">{title}</p>
+      <p className="max-w-xs text-xs text-muted-foreground">{description}</p>
     </div>
   );
 }

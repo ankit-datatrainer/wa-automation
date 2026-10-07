@@ -1,11 +1,14 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isWebDemo } from "@/lib/demo";
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
 const PUBLIC_ROUTES = ["/", "/login", "/signup", "/forgot-password", "/reset-password", "/loading-preview"];
 
 export async function middleware(request: NextRequest) {
+  if (isWebDemo) return NextResponse.next({ request });
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -42,7 +45,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  const isAuthPage = ["/login", "/signup", "/forgot-password", "/reset-password"].some((r) => pathname.startsWith(r));
+  // /reset-password is excluded: the recovery link signs the user in, and they
+  // must still reach the form to set a new password.
+  const isAuthPage = ["/login", "/signup", "/forgot-password"].some((r) => pathname.startsWith(r));
   if (user && isAuthPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";

@@ -383,25 +383,27 @@ settingsRouter.get(
     // Role mapping
     const roleIdMap: Record<string, number> = { owner: 1, admin: 2, manager: 3, agent: 4 };
 
+    // Missing values stay null/zero so the UI can show an honest empty state
+    // rather than placeholder data that looks like the user's own.
     res.json({
       user: {
         id: u?.id || userId,
-        name: u?.name || "Ayush",
+        name: u?.name ?? null,
         email: u?.email || req.auth!.email,
-        mobile: u?.phone || "7428720768",
-        city: "Not specified",
-        country: u?.country || "IN",
+        mobile: u?.phone ?? null,
+        city: null,
+        country: u?.country ?? null,
         avatarUrl: u?.avatar_url || null,
       },
       company: {
-        companyName: org?.name || "Not specified",
-        domain: org?.slug ? `${org.slug}.waautomation.com` : "Not specified",
+        companyName: org?.name ?? null,
+        domain: org?.slug ? `${org.slug}.waautomation.com` : null,
         organizationId: org?.id || orgId,
       },
       balance: {
-        currentBalance: Number(org?.wallet_balance ?? 1003.89),
-        totalCredit: totalCredit > 0 ? totalCredit : 1010.0,
-        totalDebit: totalDebit > 0 ? totalDebit : 6.11,
+        currentBalance: Number(org?.wallet_balance ?? 0),
+        totalCredit,
+        totalDebit,
         currency: org?.currency || "INR",
       },
       pricing: {
@@ -415,10 +417,10 @@ settingsRouter.get(
         role: member?.role || "owner",
         countryId: 98,
         agentId: null,
-        createdAt: u?.created_at || "2026-08-05T00:00:00Z",
-        updatedAt: u?.updated_at || "2026-08-12T00:00:00Z",
-        isDemo: org?.is_demo ?? true,
-        demoExpiresAt: org?.trial_ends_at || "2026-09-08T00:00:00Z",
+        createdAt: u?.created_at ?? org?.created_at ?? null,
+        updatedAt: u?.updated_at ?? null,
+        isDemo: org?.is_demo ?? false,
+        demoExpiresAt: org?.trial_ends_at ?? null,
       },
     });
   }),

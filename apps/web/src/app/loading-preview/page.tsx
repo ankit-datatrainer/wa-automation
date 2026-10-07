@@ -1,56 +1,82 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
+import { motion } from "motion/react";
+import { ArrowLeft, RotateCw, Shield, User } from "lucide-react";
 import { LoadingScreen } from "@/components/ui/loading-screen";
 import { Button } from "@/components/ui/button";
-import { RotateCw, Shield, User } from "lucide-react";
+import { Logo } from "@/components/brand/logo";
+import { SegmentedTabs, ease } from "@/components/motion";
+
+type Mode = "user" | "superadmin";
 
 export default function LoadingPreviewPage() {
-  const [mode, setMode] = useState<"user" | "superadmin">("user");
+  const [mode, setMode] = useState<Mode>("user");
   const [key, setKey] = useState(0);
 
-  const handleRestart = (newMode: "user" | "superadmin") => {
-    setMode(newMode);
+  const replay = (next: Mode) => {
+    setMode(next);
     setKey((prev) => prev + 1);
   };
 
   return (
-    <main className="relative min-h-screen bg-white">
-      {/* Loading Screen Overlay */}
-      <LoadingScreen
-        key={key}
-        isSuperAdmin={mode === "superadmin"}
-        isLoading={false}
-        minDurationMs={3200}
-      />
+    <main className="relative min-h-screen overflow-hidden bg-aurora">
+      {/* Loading screen overlay — remounted on every replay */}
+      <LoadingScreen key={key} isSuperAdmin={mode === "superadmin"} isLoading={false} minDurationMs={3200} />
 
-      {/* Background Dashboard Mock (revealed once loading finishes) */}
-      <div className="flex min-h-screen flex-col items-center justify-center p-8 text-center">
-        <div className="max-w-md space-y-4 rounded-2xl border bg-gray-50/50 p-8 shadow-sm">
-          <h1 className="text-2xl font-bold text-gray-900">
-            {mode === "superadmin" ? "Platform Administration" : "Main Dashboard"} Loaded!
-          </h1>
-          <p className="text-sm text-gray-500">
-            The loading screen has completed its sequence and smoothly transitioned to the dashboard.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
-            <Button
-              onClick={() => handleRestart("user")}
-              variant="primary"
-              className="gap-2 bg-[#00C268] hover:bg-[#00A859] text-white"
-            >
-              <User size={16} />
-              Replay User Loading
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-grid opacity-40 [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
+
+      <div className="relative mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-6 sm:px-6">
+        <header className="flex items-center justify-between gap-4">
+          <Logo href="/" />
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-brand-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          >
+            <ArrowLeft size={15} aria-hidden />
+            Home
+          </Link>
+        </header>
+
+        <div className="flex flex-1 items-center justify-center py-10">
+          <motion.div
+            key={key}
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, ease, delay: 3.6 }}
+            className="surface w-full max-w-md space-y-6 p-6 text-center shadow-lift sm:p-8"
+          >
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+              {mode === "superadmin" ? <Shield size={24} aria-hidden /> : <User size={24} aria-hidden />}
+            </span>
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold tracking-tight">
+                {mode === "superadmin" ? "Platform administration" : "Main dashboard"}{" "}
+                <span className="text-gradient">loaded</span>
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                The loading screen finished its sequence and faded into the page. Pick a variant and replay it.
+              </p>
+            </div>
+
+            <div className="flex justify-center">
+              <SegmentedTabs<Mode>
+                layoutId="loading-preview-mode"
+                value={mode}
+                onChange={replay}
+                tabs={[
+                  { value: "user", label: "User" },
+                  { value: "superadmin", label: "Super admin" },
+                ]}
+              />
+            </div>
+
+            <Button onClick={() => replay(mode)} className="w-full">
+              <RotateCw size={16} aria-hidden />
+              Replay {mode === "superadmin" ? "super admin" : "user"} loading
             </Button>
-            <Button
-              onClick={() => handleRestart("superadmin")}
-              variant="outline"
-              className="gap-2"
-            >
-              <Shield size={16} />
-              Replay Super Admin
-            </Button>
-          </div>
+          </motion.div>
         </div>
       </div>
     </main>

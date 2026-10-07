@@ -35,9 +35,7 @@ taxonomyRouter.get(
       .eq("organization_id", orgId)
       .order("name");
 
-    if (error || !data || data.length === 0) {
-      return res.json(demoData.tags);
-    }
+    if (error) throw error;
 
     res.json({
       data: (data ?? []).map((tag) => ({
@@ -124,9 +122,7 @@ taxonomyRouter.get(
       .eq("organization_id", req.auth!.organizationId)
       .order("name");
 
-    if (error || !data || data.length === 0) {
-      return res.json(demoData.groups);
-    }
+    if (error) throw error;
 
     res.json({
       data: (data ?? []).map((group) => ({

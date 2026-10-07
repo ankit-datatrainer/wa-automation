@@ -1,1266 +1,693 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowRight,
+  BookOpen,
   Building2,
   Car,
-  Check,
-  ChevronRight,
+  ExternalLink,
   Eye,
   FileText,
   GraduationCap,
-  Heart,
   HeartHandshake,
+  HeartPulse,
   Home,
-  Info,
+  ImageIcon,
   Landmark,
   Layers,
-  MessageCircle,
-  MoreVertical,
-  Plus,
+  MousePointerClick,
   Search,
   ShoppingCart,
   Sparkles,
-  Tv,
+  Store,
+  Type,
   Video,
+  Wand2,
   Wrench,
   X,
-  ExternalLink,
-  Edit3,
+  type LucideIcon,
 } from "lucide-react";
-import { toast } from "sonner";
+import { PageHeader } from "@/components/layout/page-header";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { EmptyState, Skeleton } from "@/components/ui/states";
+import {
+  AnimatedNumber,
+  AnimatePresence,
+  FadeIn,
+  HoverLift,
+  motion,
+  SegmentedTabs,
+  Spotlight,
+} from "@/components/motion";
+import { api } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { Modal, useRetained } from "../templates/modal";
+import { TemplateBuilder } from "../templates/template-builder";
+import { MessageBubble, RichText, TemplatePreview } from "../templates/template-preview";
+import {
+  CATEGORY_META,
+  headerFormatOf,
+  languageLabel,
+  normalizeLanguage,
+  toDraft,
+  toTemplateName,
+  type BuilderInitial,
+  type RawComponents,
+  type TemplateCategory,
+} from "../templates/template-model";
+import { STARTER_TEMPLATES, type StarterTemplate } from "./library-data";
 
-interface TemplateItem {
+const ease = [0.22, 1, 0.36, 1] as const;
+
+/** Row from GET /templates/library. */
+interface LibraryApiItem {
   id: string;
-  name: string;
-  technicalName: string;
-  category: "marketing" | "utility" | "authentication";
-  subcategory:
-    | "ecommerce"
-    | "education"
-    | "banking"
-    | "webinar"
-    | "healthcare"
-    | "automobile"
-    | "real-estate"
-    | "service"
-    | "nonprofit";
-  headline?: string;
-  body: string;
-  footer?: string;
-  headerType?: "IMAGE" | "TEXT" | "VIDEO" | "DOCUMENT";
-  buttonText?: string;
-  buttonType?: "URL" | "QUICK_REPLY";
+  title: string;
+  description?: string | null;
+  industry?: string | null;
   language: string;
-  componentsCount: number;
+  category: TemplateCategory;
+  components: RawComponents;
 }
 
-const ALL_TEMPLATES: TemplateItem[] = [
-  // ================= NONPROFIT (5) =================
-  {
-    id: "np-1",
-    name: "nonprofit fundraising campaign",
-    technicalName: "nonprofit_fundraising_campaign",
-    category: "marketing",
-    subcategory: "nonprofit",
-    body: "Hi {{1}}, support our {{2}} campaign and help us reach more people in need. Every contribution matters.",
-    footer: "Together, we can make a difference.",
-    headerType: "IMAGE",
-    buttonText: "Donate Now",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "np-2",
-    name: "nonprofit campaigns carousel",
-    technicalName: "nonprofit_campaigns_carousel",
-    category: "marketing",
-    subcategory: "nonprofit",
-    body: "Hi {{1}}, choose a cause you care about and support our active campaigns.",
-    footer: "Building brighter futures.",
-    headerType: "IMAGE",
-    buttonText: "Explore Causes",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "np-3",
-    name: "nonprofit donation receipt",
-    technicalName: "nonprofit_donation_receipt",
-    category: "utility",
-    subcategory: "nonprofit",
-    body: "Hi {{1}}, your donation receipt for contribution ID {{2}} is ready. Please download it from the link below.",
-    footer: "Tax exemption certificate 80G included.",
-    headerType: "DOCUMENT",
-    buttonText: "Download Receipt",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "np-4",
-    name: "nonprofit volunteer drive invite",
-    technicalName: "nonprofit_volunteer_drive_invite",
-    category: "marketing",
-    subcategory: "nonprofit",
-    body: "Hi {{1}}, join our volunteer drive on {{2}} at {{3}}. Your time can make a real difference.",
-    footer: "Make an impact in your community.",
-    headerType: "IMAGE",
-    buttonText: "Register as Volunteer",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "np-5",
-    name: "nonprofit donation thank you",
-    technicalName: "nonprofit_donation_thank_you",
-    category: "utility",
-    subcategory: "nonprofit",
-    headline: "Thank You for Donating",
-    body: "Hi {{1}}, thank you for your generous donation of ₹{{2}}. Your support helps us serve our community.",
-    footer: "With sincere gratitude from our entire team.",
-    headerType: "TEXT",
-    buttonText: "View Impact Report",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
+interface LibraryTemplate {
+  id: string;
+  title: string;
+  name: string;
+  description?: string;
+  category: TemplateCategory;
+  industry: string;
+  language: string;
+  components: RawComponents;
+  source: "starter" | "workspace";
+}
 
-  // ================= HEALTHCARE (5) =================
-  {
-    id: "hc-1",
-    name: "healthcare appointment confirmation",
-    technicalName: "healthcare_appointment_confirmation",
-    category: "utility",
-    subcategory: "healthcare",
-    headline: "Appointment Confirmed",
-    body: "Hi {{1}}, your appointment with Dr. {{2}} is confirmed for {{3}} at {{4}}.",
-    footer: "Please arrive 10 minutes before your slot.",
-    headerType: "TEXT",
-    buttonText: "View Clinic Location",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "hc-2",
-    name: "healthcare medicine reminder",
-    technicalName: "healthcare_medicine_reminder",
-    category: "utility",
-    subcategory: "healthcare",
-    headline: "Medicine Reminder",
-    body: "Hi {{1}}, this is a reminder to take your prescribed medicine {{2}} at {{3}}.",
-    footer: "Stay healthy and adhere to your prescription.",
-    headerType: "TEXT",
-    buttonText: "I have taken it",
-    buttonType: "QUICK_REPLY",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "hc-3",
-    name: "healthcare lab report ready",
-    technicalName: "healthcare_lab_report_ready",
-    category: "utility",
-    subcategory: "healthcare",
-    body: "Hi {{1}}, your lab report for {{2}} is now available. Please consult your doctor for medical advice.",
-    footer: "Diagnostic Care Centre",
-    headerType: "DOCUMENT",
-    buttonText: "Download Lab Report",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "hc-4",
-    name: "healthcare services carousel",
-    technicalName: "healthcare_services_carousel",
-    category: "marketing",
-    subcategory: "healthcare",
-    body: "Hi {{1}}, explore our healthcare services designed for your well-being.",
-    footer: "Comprehensive care for your family.",
-    headerType: "IMAGE",
-    buttonText: "Book Checkup",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "hc-5",
-    name: "healthcare wellness checkup discount",
-    technicalName: "healthcare_wellness_checkup_discount",
-    category: "marketing",
-    subcategory: "healthcare",
-    body: "Hi {{1}}, get 30% off on full body health packages this month. Use code {{2}} at checkout.",
-    footer: "Offer valid till end of month.",
-    headerType: "IMAGE",
-    buttonText: "Claim Discount",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
+type CategoryFilter = "all" | TemplateCategory;
 
-  // ================= WEBINAR (5) =================
-  {
-    id: "wb-1",
-    name: "webinar invitation growth masterclass",
-    technicalName: "webinar_invitation_growth_masterclass",
-    category: "marketing",
-    subcategory: "webinar",
-    body: "Hi {{1}}, join our live webinar on {{2}} and learn practical strategies from industry experts. Seats are limited.",
-    footer: "Live Q&A included.",
-    headerType: "IMAGE",
-    buttonText: "Reserve Free Seat",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "wb-2",
-    name: "webinar registration confirmation",
-    technicalName: "webinar_registration_confirmation",
-    category: "utility",
-    subcategory: "webinar",
-    headline: "Registration Confirmed",
-    body: "Hi {{1}}, your registration for {{2}} is confirmed. The session starts on {{3}} at {{4}}.",
-    footer: "Link to join will be active 15 mins prior.",
-    headerType: "TEXT",
-    buttonText: "Add to Calendar",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "wb-3",
-    name: "webinar reminder one hour",
-    technicalName: "webinar_reminder_one_hour",
-    category: "utility",
-    subcategory: "webinar",
-    headline: "Webinar Starts Soon",
-    body: "Hi {{1}}, reminder that {{2}} starts in 1 hour. Keep your questions ready for the live Q&A.",
-    footer: "See you in the session!",
-    headerType: "TEXT",
-    buttonText: "Join Stream Now",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "wb-4",
-    name: "webinar recording available",
-    technicalName: "webinar_recording_available",
-    category: "utility",
-    subcategory: "webinar",
-    body: "Hi {{1}}, thanks for attending {{2}}. The recording is now available for you to watch anytime.",
-    footer: "Access available for 30 days.",
-    headerType: "VIDEO",
-    buttonText: "Watch Recording",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "wb-5",
-    name: "webinar series carousel",
-    technicalName: "webinar_series_carousel",
-    category: "marketing",
-    subcategory: "webinar",
-    body: "Hi {{1}}, explore our upcoming webinar series and choose the session that fits your goals.",
-    footer: "Master new skills weekly.",
-    headerType: "IMAGE",
-    buttonText: "View Schedule",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
+const INDUSTRY_ICONS: Record<string, LucideIcon> = {
+  ecommerce: ShoppingCart,
+  education: GraduationCap,
+  banking: Landmark,
+  webinar: Video,
+  healthcare: HeartPulse,
+  automobile: Car,
+  "real-estate": Home,
+  service: Wrench,
+  nonprofit: HeartHandshake,
+  retail: Store,
+  general: Building2,
+};
 
-  // ================= ECOMMERCE (5) =================
-  {
-    id: "ec-1",
-    name: "ecommerce order confirmation",
-    technicalName: "ecommerce_order_confirmation",
-    category: "utility",
-    subcategory: "ecommerce",
-    headline: "Order Confirmed",
-    body: "Hi {{1}}, your order #{{2}} for {{3}} has been confirmed and is being packed.",
-    footer: "Track delivery status in real-time.",
-    headerType: "TEXT",
-    buttonText: "Track Order",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "ec-2",
-    name: "ecommerce shipping update",
-    technicalName: "ecommerce_shipping_update",
-    category: "utility",
-    subcategory: "ecommerce",
-    headline: "Out for Delivery",
-    body: "Hi {{1}}, your package is out for delivery with courier partner {{2}}. Delivery OTP is {{3}}.",
-    footer: "Expected delivery by 6 PM today.",
-    headerType: "TEXT",
-    buttonText: "Live GPS Tracking",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "ec-3",
-    name: "ecommerce abandoned cart discount",
-    technicalName: "ecommerce_abandoned_cart_discount",
-    category: "marketing",
-    subcategory: "ecommerce",
-    body: "Hi {{1}}, items in your cart are waiting! Complete your order now and enjoy 15% off with code {{2}}.",
-    footer: "Cart reserved for 24 hours.",
-    headerType: "IMAGE",
-    buttonText: "Complete Purchase",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "ec-4",
-    name: "ecommerce product back in stock",
-    technicalName: "ecommerce_product_back_in_stock",
-    category: "marketing",
-    subcategory: "ecommerce",
-    body: "Good news {{1}}! The item {{2}} you were looking for is back in stock. Grab yours before it runs out.",
-    footer: "Limited quantities available.",
-    headerType: "IMAGE",
-    buttonText: "Buy Now",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "ec-5",
-    name: "ecommerce festive flash sale",
-    technicalName: "ecommerce_festive_flash_sale",
-    category: "marketing",
-    subcategory: "ecommerce",
-    body: "Hi {{1}}, our biggest festive sale is live! Get up to 50% discount on entire {{2}} collection today.",
-    footer: "Free shipping on orders above ₹499.",
-    headerType: "IMAGE",
-    buttonText: "Shop Collection",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
+const HEADER_ICONS: Record<string, LucideIcon> = {
+  TEXT: Type,
+  IMAGE: ImageIcon,
+  VIDEO: Video,
+  DOCUMENT: FileText,
+};
 
-  // ================= EDUCATION (5) =================
-  {
-    id: "ed-1",
-    name: "education course enrollment confirmation",
-    technicalName: "education_course_enrollment_confirmation",
-    category: "utility",
-    subcategory: "education",
-    headline: "Welcome to Class",
-    body: "Hi {{1}}, you are successfully enrolled in {{2}}. Your portal credentials have been sent to {{3}}.",
-    footer: "Class starts next Monday.",
-    headerType: "TEXT",
-    buttonText: "Access Student Portal",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "ed-2",
-    name: "education exam schedule announcement",
-    technicalName: "education_exam_schedule_announcement",
-    category: "utility",
-    subcategory: "education",
-    body: "Dear {{1}}, the exam schedule for semester {{2}} has been published. Please review your hall ticket details.",
-    footer: "Controller of Examinations",
-    headerType: "DOCUMENT",
-    buttonText: "Download Hall Ticket",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "ed-3",
-    name: "education new batch scholarship offer",
-    technicalName: "education_new_batch_scholarship_offer",
-    category: "marketing",
-    subcategory: "education",
-    body: "Hi {{1}}, applications for {{2}} merit scholarship are now open. Get up to 100% tuition waiver.",
-    footer: "Apply before {{3}}.",
-    headerType: "IMAGE",
-    buttonText: "Apply for Scholarship",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "ed-4",
-    name: "education webinar masterclass invite",
-    technicalName: "education_webinar_masterclass_invite",
-    category: "marketing",
-    subcategory: "education",
-    body: "Hi {{1}}, join our career masterclass on {{2}} with senior instructors from top tech institutes.",
-    footer: "Includes certificate of participation.",
-    headerType: "IMAGE",
-    buttonText: "Register Free",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "ed-5",
-    name: "education fee payment receipt",
-    technicalName: "education_fee_payment_receipt",
-    category: "utility",
-    subcategory: "education",
-    headline: "Payment Received",
-    body: "Hi {{1}}, we received fee payment of ₹{{2}} for student ID {{3}}. Transaction ref: {{4}}.",
-    footer: "Official fee acknowledgment.",
-    headerType: "TEXT",
-    buttonText: "Download Receipt",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
+/** Decorative bubbles for the hero. */
+const HERO_SAMPLES = ["hc-1", "ec-3", "sv-3"]
+  .map((id) => STARTER_TEMPLATES.find((t) => t.id === id))
+  .filter((t): t is StarterTemplate => Boolean(t));
 
-  // ================= BANKING (5) =================
-  {
-    id: "bk-1",
-    name: "banking transaction alert",
-    technicalName: "banking_transaction_alert",
-    category: "utility",
-    subcategory: "banking",
-    headline: "Transaction Alert",
-    body: "A/C *{{1}} debited with ₹{{2}} on {{3}}. Available balance is ₹{{4}}.",
-    footer: "If not done by you, block card instantly.",
-    headerType: "TEXT",
-    buttonText: "Report Dispute",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "bk-2",
-    name: "banking otp verification",
-    technicalName: "banking_otp_verification",
-    category: "authentication",
-    subcategory: "banking",
-    body: "{{1}} is your one-time password (OTP) for login verification. Valid for 10 minutes. Do not share with anyone.",
-    footer: "Security Verification",
-    headerType: "TEXT",
-    buttonText: "Copy OTP Code",
-    buttonType: "QUICK_REPLY",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "bk-3",
-    name: "banking loan pre approval offer",
-    technicalName: "banking_loan_pre_approval_offer",
-    category: "marketing",
-    subcategory: "banking",
-    body: "Congratulations {{1}}! You have pre-approved personal loan offer of up to ₹{{2}} with zero paperwork.",
-    footer: "Interest rate starting 10.49% p.a.",
-    headerType: "IMAGE",
-    buttonText: "Check Loan Limit",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "bk-4",
-    name: "banking monthly statement ready",
-    technicalName: "banking_monthly_statement_ready",
-    category: "utility",
-    subcategory: "banking",
-    body: "Dear {{1}}, your e-statement for account *{{2}} for the month of {{3}} is now available for download.",
-    footer: "Password is your 4-digit birth year + PAN.",
-    headerType: "DOCUMENT",
-    buttonText: "View Statement",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "bk-5",
-    name: "banking credit card reward points",
-    technicalName: "banking_credit_card_reward_points",
-    category: "marketing",
-    subcategory: "banking",
-    body: "Hi {{1}}, you have {{2}} unredeemed credit card reward points expiring on {{3}}. Convert to vouchers today.",
-    footer: "Redeem against shopping and flights.",
-    headerType: "IMAGE",
-    buttonText: "Redeem Points",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
+const toSlug = (value: string) => value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+const industryLabel = (slug: string) =>
+  slug
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+const titleCase = (value: string) => value.replace(/(^|\s)\S/g, (c) => c.toUpperCase());
 
-  // ================= AUTOMOBILE (5) =================
-  {
-    id: "au-1",
-    name: "automobile test drive booking confirmation",
-    technicalName: "automobile_test_drive_booking_confirmation",
-    category: "utility",
-    subcategory: "automobile",
-    headline: "Test Drive Confirmed",
-    body: "Hi {{1}}, your test drive for {{2}} is confirmed at {{3}} dealership on {{4}}.",
-    footer: "Please carry valid driving license.",
-    headerType: "TEXT",
-    buttonText: "Directions to Showroom",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "au-2",
-    name: "automobile service maintenance reminder",
-    technicalName: "automobile_service_maintenance_reminder",
-    category: "utility",
-    subcategory: "automobile",
-    headline: "Service Due",
-    body: "Hi {{1}}, your vehicle {{2}} is due for periodic maintenance service. Book doorstep pick & drop.",
-    footer: "Ensure optimal vehicle performance.",
-    headerType: "TEXT",
-    buttonText: "Schedule Service Slot",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "au-3",
-    name: "automobile vehicle inspection report",
-    technicalName: "automobile_vehicle_inspection_report",
-    category: "utility",
-    subcategory: "automobile",
-    body: "Hi {{1}}, the multi-point inspection report for your vehicle {{2}} is ready with diagnostic results.",
-    footer: "Authorized Service Center",
-    headerType: "DOCUMENT",
-    buttonText: "Download Full Report",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "au-4",
-    name: "automobile new car launch event",
-    technicalName: "automobile_new_car_launch_event",
-    category: "marketing",
-    subcategory: "automobile",
-    body: "Hi {{1}}, experience the all-new {{2}} with futuristic electric powertrain and ADAS level 2 safety.",
-    footer: "Special pre-booking benefits available.",
-    headerType: "IMAGE",
-    buttonText: "Explore Features",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "au-5",
-    name: "automobile festive exchange bonus",
-    technicalName: "automobile_festive_exchange_bonus",
-    category: "marketing",
-    subcategory: "automobile",
-    body: "Upgrade your drive {{1}}! Get additional exchange bonus of up to ₹{{2}} when trading in old vehicle.",
-    footer: "Free valuation at your doorstep.",
-    headerType: "IMAGE",
-    buttonText: "Get Free Valuation",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
+function fromStarter(t: StarterTemplate): LibraryTemplate {
+  const components: RawComponents = {
+    ...(t.headerType && {
+      header: t.headerType === "TEXT" ? { format: "TEXT", text: t.headline ?? "" } : { format: t.headerType },
+    }),
+    body: { text: t.body },
+    ...(t.footer && { footer: { text: t.footer } }),
+    ...(t.buttonText && { buttons: [{ type: t.buttonType ?? "QUICK_REPLY", text: t.buttonText }] }),
+  };
+  return {
+    id: t.id,
+    title: titleCase(t.name.replace(/-/g, " ")),
+    name: t.technicalName,
+    category: t.category,
+    industry: t.subcategory,
+    language: normalizeLanguage(t.language),
+    components,
+    source: "starter",
+  };
+}
 
-  // ================= REAL-ESTATE (5) =================
-  {
-    id: "re-1",
-    name: "real-estate site visit confirmation",
-    technicalName: "real_estate_site_visit_confirmation",
-    category: "utility",
-    subcategory: "real-estate",
-    headline: "Site Visit Confirmed",
-    body: "Hi {{1}}, your visit to {{2}} project is confirmed for {{3}}. Relationship manager {{4}} will guide you.",
-    footer: "Complimentary cab facility arranged.",
-    headerType: "TEXT",
-    buttonText: "Open Location Map",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "re-2",
-    name: "real-estate property booking token receipt",
-    technicalName: "real_estate_booking_token_receipt",
-    category: "utility",
-    subcategory: "real-estate",
-    body: "Dear {{1}}, we acknowledge receipt of booking token for unit #{{2}} in {{3}}. Welcome to the community.",
-    footer: "Official Developer Booking Slip",
-    headerType: "DOCUMENT",
-    buttonText: "Download Receipt",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "re-3",
-    name: "real-estate exclusive penthouse launch",
-    technicalName: "real_estate_exclusive_penthouse_launch",
-    category: "marketing",
-    subcategory: "real-estate",
-    body: "Hi {{1}}, presenting ultra-luxury 4 & 5 BHK sky villas at {{2}} with private deck and panoramic city views.",
-    footer: "Early bird pricing for VIP clients.",
-    headerType: "IMAGE",
-    buttonText: "Download Brochure",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "re-4",
-    name: "real-estate investment opportunities brochure",
-    technicalName: "real_estate_investment_opportunities",
-    category: "marketing",
-    subcategory: "real-estate",
-    body: "Hi {{1}}, discover high-yielding commercial real estate assets with assured {{2}}% rental returns.",
-    footer: "Grade A pre-leased office spaces.",
-    headerType: "IMAGE",
-    buttonText: "View ROI Calculator",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "re-5",
-    name: "real-estate price drop alert",
-    technicalName: "real_estate_price_drop_alert",
-    category: "marketing",
-    subcategory: "real-estate",
-    body: "Price Drop Alert {{1}}! The 3 BHK apartment in {{2}} is now available at revised pricing with zero GST.",
-    footer: "Only 2 units remaining at this price.",
-    headerType: "IMAGE",
-    buttonText: "Book Inspection",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-
-  // ================= SERVICE (5) =================
-  {
-    id: "sv-1",
-    name: "service subscription renewal offer",
-    technicalName: "service_subscription_renewal_offer",
-    category: "marketing",
-    subcategory: "service",
-    body: "Hi {{1}}, renew your {{2}} subscription today and get a special discount using the coupon code below.",
-    footer: "Never miss out on premium features.",
-    headerType: "IMAGE",
-    buttonText: "Renew with 20% Off",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "sv-2",
-    name: "service technician visit scheduled",
-    technicalName: "service_technician_visit_scheduled",
-    category: "utility",
-    subcategory: "service",
-    headline: "Technician Assigned",
-    body: "Hi {{1}}, engineer {{2}} is assigned for your service request #{{3}} and will arrive on {{4}}.",
-    footer: "Call helpline for rescheduling.",
-    headerType: "TEXT",
-    buttonText: "Track Technician Live",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "sv-3",
-    name: "service request resolved feedback",
-    technicalName: "service_request_resolved_feedback",
-    category: "utility",
-    subcategory: "service",
-    headline: "Service Completed",
-    body: "Hi {{1}}, ticket #{{2}} has been resolved. Please take 10 seconds to rate your service experience.",
-    footer: "Your feedback helps us improve.",
-    headerType: "TEXT",
-    buttonText: "Rate Experience",
-    buttonType: "QUICK_REPLY",
-    language: "EN_US",
-    componentsCount: 3,
-  },
-  {
-    id: "sv-4",
-    name: "service annual maintenance contract promo",
-    technicalName: "service_annual_maintenance_contract_promo",
-    category: "marketing",
-    subcategory: "service",
-    body: "Hi {{1}}, safeguard your appliances with AMC plans covering unlimited breakdowns and free spares.",
-    footer: "Complete peace of mind coverage.",
-    headerType: "IMAGE",
-    buttonText: "Choose AMC Plan",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-  {
-    id: "sv-5",
-    name: "service invoice receipt ready",
-    technicalName: "service_invoice_receipt_ready",
-    category: "utility",
-    subcategory: "service",
-    body: "Hi {{1}}, invoice #{{2}} for ₹{{3}} has been generated for your recent service on {{4}}.",
-    footer: "GST Tax Invoice Attached",
-    headerType: "DOCUMENT",
-    buttonText: "Download Invoice PDF",
-    buttonType: "URL",
-    language: "EN_US",
-    componentsCount: 4,
-  },
-];
-
-const SUBCATEGORIES_CONFIG = [
-  { id: "all", label: "All Sub-categories", count: 45, icon: Layers },
-  { id: "ecommerce", label: "Ecommerce", count: 5, icon: ShoppingCart },
-  { id: "education", label: "Education", count: 5, icon: GraduationCap },
-  { id: "banking", label: "Banking", count: 5, icon: Landmark },
-  { id: "webinar", label: "Webinar", count: 5, icon: Video },
-  { id: "healthcare", label: "Healthcare", count: 5, icon: Heart },
-  { id: "automobile", label: "Automobile", count: 5, icon: Car },
-  { id: "real-estate", label: "Real-Estate", count: 5, icon: Home },
-  { id: "service", label: "Service", count: 5, icon: Wrench },
-  { id: "nonprofit", label: "Nonprofit", count: 5, icon: HeartHandshake },
-];
+function fromApi(t: LibraryApiItem): LibraryTemplate {
+  return {
+    id: `lib-${t.id}`,
+    title: t.title,
+    name: toTemplateName(t.title),
+    description: t.description ?? undefined,
+    category: t.category,
+    industry: toSlug(t.industry || "general"),
+    language: normalizeLanguage(t.language || "en"),
+    components: t.components ?? { body: { text: "" } },
+    source: "workspace",
+  };
+}
 
 export default function TemplateLibraryPage() {
   const router = useRouter();
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string>("all");
+  const queryClient = useQueryClient();
+  const [category, setCategory] = useState<CategoryFilter>("all");
+  const [industry, setIndustry] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [previewTemplate, setPreviewTemplate] = useState<TemplateItem | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<LibraryTemplate | null>(null);
+  const shownPreview = useRetained(previewTemplate);
+  const [builderInitial, setBuilderInitial] = useState<BuilderInitial | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
 
-  // Category counts
-  const categoryCounts = useMemo(() => {
-    return {
-      all: ALL_TEMPLATES.length, // 45
-      marketing: ALL_TEMPLATES.filter((t) => t.category === "marketing").length, // 21
-      utility: ALL_TEMPLATES.filter((t) => t.category === "utility").length, // 23
-      authentication: ALL_TEMPLATES.filter((t) => t.category === "authentication").length, // 1
-    };
-  }, []);
+  const libraryQuery = useQuery({
+    queryKey: ["templates", "library"],
+    queryFn: () => api.get<{ data: LibraryApiItem[] }>("/templates/library"),
+    staleTime: 5 * 60_000,
+  });
 
-  // Filtered templates
-  const filteredTemplates = useMemo(() => {
-    return ALL_TEMPLATES.filter((item) => {
-      // Category filter
-      if (selectedCategory !== "all" && item.category !== selectedCategory) {
-        return false;
-      }
-      // Subcategory filter
-      if (selectedSubcategory !== "all" && item.subcategory !== selectedSubcategory) {
-        return false;
-      }
-      // Search filter
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const matchesName = item.name.toLowerCase().includes(q);
-        const matchesBody = item.body.toLowerCase().includes(q);
-        const matchesSub = item.subcategory.toLowerCase().includes(q);
-        return matchesName || matchesBody || matchesSub;
-      }
-      return true;
+  // Workspace library entries first, then the built-in starters (deduped by technical name).
+  const allTemplates = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: LibraryTemplate[] = [];
+    for (const item of [
+      ...(libraryQuery.data?.data ?? []).map(fromApi),
+      ...STARTER_TEMPLATES.map(fromStarter),
+    ]) {
+      if (seen.has(item.name)) continue;
+      seen.add(item.name);
+      merged.push(item);
+    }
+    return merged;
+  }, [libraryQuery.data]);
+
+  const categoryCounts = useMemo(
+    () => ({
+      all: allTemplates.length,
+      marketing: allTemplates.filter((t) => t.category === "marketing").length,
+      utility: allTemplates.filter((t) => t.category === "utility").length,
+      authentication: allTemplates.filter((t) => t.category === "authentication").length,
+    }),
+    [allTemplates],
+  );
+
+  const industries = useMemo(() => {
+    const inCategory = allTemplates.filter((t) => category === "all" || t.category === category);
+    const counts = new Map<string, number>();
+    for (const t of inCategory) counts.set(t.industry, (counts.get(t.industry) ?? 0) + 1);
+    return [
+      { id: "all", label: "All industries", count: inCategory.length, icon: Layers },
+      ...[...counts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([id, count]) => ({ id, label: industryLabel(id), count, icon: INDUSTRY_ICONS[id] ?? Building2 })),
+    ];
+  }, [allTemplates, category]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allTemplates.filter((t) => {
+      if (category !== "all" && t.category !== category) return false;
+      if (industry !== "all" && t.industry !== industry) return false;
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.name.includes(q) ||
+        (t.components.body?.text ?? "").toLowerCase().includes(q) ||
+        t.industry.includes(q)
+      );
     });
-  }, [selectedCategory, selectedSubcategory, search]);
+  }, [allTemplates, category, industry, search]);
 
-  const handleUseTemplate = (template: TemplateItem) => {
-    toast.success(`Selected "${template.name}". Proceeding to campaign editor...`);
-    router.push(`/campaigns/new?template=${template.technicalName}`);
+  const totalIndustries = useMemo(() => new Set(allTemplates.map((t) => t.industry)).size, [allTemplates]);
+  const filtersActive = category !== "all" || industry !== "all" || search.trim() !== "";
+
+  const applyTemplate = (template: LibraryTemplate) => {
+    setPreviewTemplate(null);
+    setBuilderInitial({
+      name: template.name,
+      language: template.language,
+      category: template.category,
+      components: template.components,
+    });
+    setBuilderOpen(true);
   };
 
-  // Function to render highlighted {{1}} variable placeholders
-  const renderHighlightedBody = (text: string) => {
-    const parts = text.split(/(\{\{\d+\}\})/g);
-    return parts.map((part, index) => {
-      if (/^\{\{\d+\}\}$/.test(part)) {
-        return (
-          <span
-            key={index}
-            className="inline-block rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-blue-600 border border-blue-200/60 mx-0.5"
-          >
-            {part}
-          </span>
-        );
-      }
-      return part;
-    });
+  const startFromScratch = () => {
+    setBuilderInitial(null);
+    setBuilderOpen(true);
+  };
+
+  const changeCategory = (next: CategoryFilter) => {
+    setCategory(next);
+    // Keep the industry if it still has templates in the new category.
+    if (industry !== "all" && !allTemplates.some((t) => t.industry === industry && (next === "all" || t.category === next))) {
+      setIndustry("all");
+    }
+  };
+
+  const clearFilters = () => {
+    setCategory("all");
+    setIndustry("all");
+    setSearch("");
   };
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto pb-16 font-poppins space-y-6">
-      {/* ========================================================= */}
-      {/* 1. Breadcrumb Bar */}
-      {/* ========================================================= */}
-      <div className="flex items-center gap-2 text-xs text-gray-500 font-medium px-1">
-        <Link href="/dashboard" className="hover:text-gray-800 transition-colors">
-          🏠
-        </Link>
-        <span className="text-gray-300">&gt;</span>
-        <Link href="/campaigns" className="hover:text-gray-800 transition-colors">
-          Campaigns
-        </Link>
-        <span className="text-gray-300">&gt;</span>
-        <span className="text-gray-800 font-semibold">Template Library</span>
-      </div>
+    <div className="pb-16">
+      <PageHeader
+        title="Template Library"
+        description="Start from ready-made WhatsApp templates, customise them, and submit for Meta approval."
+        actions={
+          <>
+            <a
+              href="https://developers.facebook.com/docs/whatsapp/message-templates/guidelines"
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ variant: "outline" })}
+            >
+              <BookOpen size={16} />
+              <span className="hidden sm:inline">Meta guidelines</span>
+              <span className="sm:hidden">Guidelines</span>
+              <ExternalLink size={13} className="text-muted-foreground" />
+            </a>
+            <Link href="/campaigns/templates" className={buttonVariants({ variant: "outline" })}>
+              Your templates
+            </Link>
+            <Button onClick={startFromScratch}>
+              <Wand2 size={16} />
+              Create from scratch
+            </Button>
+          </>
+        }
+      />
 
-      {/* ========================================================= */}
-      {/* 2. Top Header Card */}
-      {/* ========================================================= */}
-      <div className="rounded-3xl border border-gray-100 bg-white p-6 sm:p-7 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#00C268] text-white flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0 mt-0.5">
-            <FileText size={22} className="fill-white/20 stroke-white" />
+      {/* Hero */}
+      <FadeIn>
+        <Card className="relative overflow-hidden border-brand-100 bg-aurora p-6 sm:p-8">
+          <div aria-hidden className="absolute inset-0 bg-grid opacity-40 [mask-image:radial-gradient(ellipse_at_top_left,black,transparent_70%)]" />
+          <div className="relative grid grid-cols-1 items-center gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-brand-700 shadow-soft ring-1 ring-brand-100">
+                <Sparkles size={13} />
+                Written for high approval rates
+              </span>
+              <h2 className="mt-4 max-w-xl font-display text-2xl font-bold leading-tight tracking-tight sm:text-3xl">
+                Launch campaigns faster with <span className="text-gradient">proven templates</span>
+              </h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
+                Pick a template, tweak the wording, buttons and variables in the live editor, and it&apos;s saved
+                to your account as a draft ready for review.
+              </p>
+              <dl className="mt-6 grid max-w-md grid-cols-3 gap-3">
+                {[
+                  { label: "Templates", value: allTemplates.length },
+                  { label: "Industries", value: totalIndustries },
+                  { label: "Categories", value: 3 },
+                ].map((stat) => (
+                  <div
+                    key={stat.label}
+                    className="flex flex-col-reverse rounded-2xl border border-white/80 bg-white/70 p-3 shadow-soft backdrop-blur"
+                  >
+                    <dt className="text-xs font-medium text-muted-foreground">{stat.label}</dt>
+                    <dd className="font-display text-2xl font-bold tracking-tight text-foreground">
+                      <AnimatedNumber value={stat.value} />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <div aria-hidden className="relative hidden h-[230px] lg:block">
+              {HERO_SAMPLES.map((t, i) => (
+                <motion.div
+                  key={t.id}
+                  initial={{ opacity: 0, y: 24, rotate: 0 }}
+                  animate={{ opacity: 1, y: 0, rotate: [-4, 3, -1][i] }}
+                  transition={{ duration: 0.6, ease, delay: 0.2 + i * 0.12 }}
+                  className="absolute"
+                  style={{ top: i * 62, left: [0, 46, 14][i], zIndex: 3 - i }}
+                >
+                  <div className={cn("animate-float", i === 1 && "[animation-delay:1.2s]", i === 2 && "[animation-delay:2.4s]")}>
+                    <MessageBubble draft={toDraft(fromStarter(t).components)} compact className="w-[270px] drop-shadow-lg" />
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">
-              Template Library
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 max-w-3xl leading-relaxed">
-              Select or create your template and submit it for WhatsApp approval. All templates must adhere to{" "}
-              <a
-                href="https://developers.facebook.com/docs/whatsapp/message-templates/guidelines"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[#00C268] hover:underline font-semibold"
+        </Card>
+      </FadeIn>
+
+      {/* Filters */}
+      <div className="sticky top-0 z-20 -mx-4 mt-6 bg-background/85 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="scrollbar-none -mx-1 overflow-x-auto px-1">
+            <SegmentedTabs
+              layoutId="library-category"
+              value={category}
+              onChange={changeCategory}
+              tabs={(["all", "marketing", "utility", "authentication"] as const).map((value) => ({
+                value,
+                label: (
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    {value === "all" ? "All" : CATEGORY_META[value].label}
+                    <span className="rounded-full bg-brand-100/80 px-1.5 text-[10.5px] font-bold text-brand-700">
+                      {categoryCounts[value]}
+                    </span>
+                  </span>
+                ),
+              }))}
+            />
+          </div>
+          <div className="relative w-full lg:max-w-xs">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="Search the template library"
+              placeholder="Search templates…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-10 pl-10 pr-10"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-brand-50 hover:text-primary"
               >
-                WhatsApp&apos;s guidelines
-              </a>
-              .
-            </p>
+                <X size={14} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Right Action Buttons */}
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => toast.info("Opening tutorial video...")}
-            className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition-colors"
-          >
-            <Eye size={15} className="text-gray-500" />
-            <span>Watch Tutorial</span>
-          </button>
-
-          <Link
-            href="/campaigns/templates"
-            className="flex h-10 items-center gap-2 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] active:scale-95 transition-all shrink-0"
-          >
-            <Plus size={16} strokeWidth={2.5} />
-            <span>New Template Message</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 3. Category Filter Pills & Search Bar */}
-      {/* ========================================================= */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        {/* Category Pills */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* All Categories */}
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedCategory("all");
-              setSelectedSubcategory("all");
-            }}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-              selectedCategory === "all"
-                ? "bg-[#00C268] text-white shadow-xs"
-                : "border border-gray-200/80 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs"
-            }`}
-          >
-            <span>All Categories</span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                selectedCategory === "all"
-                  ? "bg-white text-[#00C268]"
-                  : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {categoryCounts.all}
-            </span>
-          </button>
-
-          {/* Marketing */}
-          <button
-            type="button"
-            onClick={() => setSelectedCategory("marketing")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-              selectedCategory === "marketing"
-                ? "bg-[#00C268] text-white shadow-xs"
-                : "border border-gray-200/80 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs"
-            }`}
-          >
-            <span>Marketing</span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                selectedCategory === "marketing"
-                  ? "bg-white text-[#00C268]"
-                  : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {categoryCounts.marketing}
-            </span>
-          </button>
-
-          {/* Utility */}
-          <button
-            type="button"
-            onClick={() => setSelectedCategory("utility")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-              selectedCategory === "utility"
-                ? "bg-[#00C268] text-white shadow-xs"
-                : "border border-gray-200/80 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs"
-            }`}
-          >
-            <span>Utility</span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                selectedCategory === "utility"
-                  ? "bg-white text-[#00C268]"
-                  : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {categoryCounts.utility}
-            </span>
-          </button>
-
-          {/* Authentication */}
-          <button
-            type="button"
-            onClick={() => setSelectedCategory("authentication")}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all ${
-              selectedCategory === "authentication"
-                ? "bg-[#00C268] text-white shadow-xs"
-                : "border border-gray-200/80 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs"
-            }`}
-          >
-            <span>Authentication</span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                selectedCategory === "authentication"
-                  ? "bg-white text-[#00C268]"
-                  : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {categoryCounts.authentication}
-            </span>
-          </button>
-        </div>
-
-        {/* Search Box */}
-        <div className="relative min-w-[240px]">
-          <Search
-            size={15}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-          />
-          <input
-            type="text"
-            placeholder="Search templates..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-10 w-full rounded-2xl border border-gray-200/80 bg-white pl-9 pr-4 text-xs text-gray-800 placeholder:text-gray-400 shadow-2xs outline-none focus:border-[#00C268] focus:ring-2 focus:ring-[#00C268]/20 transition-all"
-          />
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 4. Main Body: Sub-Categories Sidebar + Templates Grid */}
-      {/* ========================================================= */}
-      <div className="flex flex-col lg:flex-row gap-6 items-start">
-        {/* Left Sub-Categories Menu */}
-        <div className="w-full lg:w-64 shrink-0 rounded-3xl border border-gray-100 bg-white p-3 shadow-xs space-y-1">
-          {SUBCATEGORIES_CONFIG.map((sub) => {
-            const Icon = sub.icon;
-            const isSelected = selectedSubcategory === sub.id;
-
+        <div className="mask-fade-x scrollbar-none -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible lg:[mask-image:none]">
+          {industries.map((item) => {
+            const active = industry === item.id;
+            const Icon = item.icon;
             return (
               <button
-                key={sub.id}
+                key={item.id}
                 type="button"
-                onClick={() => setSelectedSubcategory(sub.id)}
-                className={`w-full flex items-center justify-between rounded-2xl px-3.5 py-2.5 text-xs font-semibold transition-all ${
-                  isSelected
-                    ? "bg-emerald-50/80 text-[#00C268] font-bold"
-                    : "text-gray-700 hover:bg-gray-50"
-                }`}
+                onClick={() => setIndustry(item.id)}
+                aria-pressed={active}
+                className={cn(
+                  "relative inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  active ? "border-transparent text-white" : "border-border bg-white text-foreground hover:border-brand-200 hover:bg-brand-50/60",
+                )}
               >
-                <div className="flex items-center gap-2.5">
-                  <Icon
-                    size={16}
-                    className={isSelected ? "text-[#00C268]" : "text-gray-400"}
+                {active && (
+                  <motion.span
+                    layoutId="library-industry"
+                    className="absolute inset-0 rounded-full bg-brand-gradient shadow-glow"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
-                  <span>{sub.label}</span>
-                </div>
-
+                )}
+                <Icon size={15} className={cn("relative z-10", !active && "text-brand-600")} />
+                <span className="relative z-10">{item.label}</span>
                 <span
-                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                    isSelected
-                      ? "bg-[#00C268] text-white shadow-2xs"
-                      : "bg-gray-100 text-gray-500"
-                  }`}
+                  className={cn(
+                    "relative z-10 rounded-full px-1.5 text-[10.5px] font-bold",
+                    active ? "bg-white/25 text-white" : "bg-muted text-muted-foreground",
+                  )}
                 >
-                  {sub.count}
+                  {item.count}
                 </span>
               </button>
             );
           })}
         </div>
-
-        {/* Right Templates Grid */}
-        <div className="flex-1 w-full">
-          {filteredTemplates.length === 0 ? (
-            <div className="rounded-3xl border border-gray-100 bg-white p-12 text-center">
-              <div className="mx-auto w-12 h-12 rounded-2xl bg-emerald-50 text-[#00C268] flex items-center justify-center mb-3">
-                <Search size={22} />
-              </div>
-              <h3 className="text-sm font-bold text-gray-900">No templates found</h3>
-              <p className="text-xs text-gray-400 mt-1">Try adjusting your filters or search keywords.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-              {filteredTemplates.map((template) => {
-                const isMarketing = template.category === "marketing";
-                const isUtility = template.category === "utility";
-
-                return (
-                  <div
-                    key={template.id}
-                    className="rounded-3xl border border-gray-100 bg-white p-5 shadow-xs flex flex-col justify-between hover:shadow-md hover:border-emerald-100/80 transition-all group"
-                  >
-                    <div>
-                      {/* Top Badges & Eye trigger */}
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* Category Badge */}
-                          <span
-                            className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${
-                              isMarketing
-                                ? "bg-emerald-50 text-emerald-700"
-                                : isUtility
-                                ? "bg-blue-50 text-blue-700"
-                                : "bg-purple-50 text-purple-700"
-                            }`}
-                          >
-                            {template.category}
-                          </span>
-
-                          {/* Subcategory Badge */}
-                          <span className="rounded-md bg-blue-50/80 text-blue-600 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide">
-                            {template.subcategory}
-                          </span>
-                        </div>
-
-                        {/* View Template Button (Eye) */}
-                        <button
-                          type="button"
-                          onClick={() => setPreviewTemplate(template)}
-                          aria-label="View template"
-                          title="View Template Preview"
-                          className="grid h-7 w-7 place-items-center rounded-lg text-gray-400 hover:text-[#00C268] hover:bg-emerald-50 transition-colors"
-                        >
-                          <Eye size={15} />
-                        </button>
-                      </div>
-
-                      {/* Template Title */}
-                      <h3 className="text-sm font-bold text-gray-900 mt-3.5 capitalize tracking-tight leading-snug">
-                        {template.name}
-                      </h3>
-
-                      {/* Optional Headline */}
-                      {template.headline && (
-                        <p className="text-xs font-semibold text-gray-700 mt-1.5">
-                          {template.headline}
-                        </p>
-                      )}
-
-                      {/* Body snippet with highlighted variables */}
-                      <p className="text-xs text-gray-500 mt-2 leading-relaxed line-clamp-3">
-                        {renderHighlightedBody(template.body)}
-                      </p>
-                    </div>
-
-                    {/* Action Button */}
-                    <div className="pt-4 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleUseTemplate(template)}
-                        className="rounded-xl bg-[#00C268] px-4 py-2 text-xs font-bold text-white shadow-2xs hover:bg-[#00ab5c] active:scale-95 transition-all"
-                      >
-                        Use Template
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* 5. "View Template" Interactive Preview Modal (Screenshot 4) */}
-      {/* ========================================================= */}
-      {previewTemplate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-3xl border border-gray-100 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto scrollbar-thin">
-            {/* Modal Topbar */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-              <h2 className="text-base font-bold text-gray-900">
-                Template Preview
-              </h2>
-              <button
-                type="button"
-                onClick={() => setPreviewTemplate(null)}
-                aria-label="Close"
-                className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
-              >
-                <X size={16} />
-              </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span>
+          <span className="font-semibold text-foreground">{filtered.length}</span>{" "}
+          {filtered.length === 1 ? "template" : "templates"}
+        </span>
+        {libraryQuery.isLoading && <Skeleton className="h-4 w-24" />}
+        {libraryQuery.isError && (
+          <button
+            type="button"
+            onClick={() => void libraryQuery.refetch()}
+            className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
+          >
+            Couldn&apos;t load featured templates — retry
+          </button>
+        )}
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+          >
+            <X size={12} />
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Gallery */}
+      <div className="mt-4">
+        {filtered.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={Search}
+              title="No templates found"
+              description="Try another industry or search term — or build your own from scratch."
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                  <Button onClick={startFromScratch}>
+                    <Wand2 size={16} />
+                    Create from scratch
+                  </Button>
+                </div>
+              }
+            />
+          </Card>
+        ) : (
+          <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <AnimatePresence mode="popLayout" initial={true}>
+              {filtered.map((template, index) => (
+                <motion.div
+                  key={template.id}
+                  layout="position"
+                  initial={{ opacity: 0, y: 16, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
+                  transition={{ duration: 0.4, ease, delay: Math.min(index, 12) * 0.035 }}
+                >
+                  <LibraryCard
+                    template={template}
+                    onPreview={() => setPreviewTemplate(template)}
+                    onUse={() => applyTemplate(template)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </div>
+
+      {/* Preview */}
+      <Modal
+        open={previewTemplate !== null}
+        onClose={() => setPreviewTemplate(null)}
+        title={shownPreview?.title ?? "Template preview"}
+        description="Preview, then customise it into your own draft"
+        icon={<Eye size={18} />}
+        size="lg"
+        footer={
+          shownPreview && (
+            <>
+              <Button variant="ghost" onClick={() => setPreviewTemplate(null)}>
+                Close
+              </Button>
+              <Button onClick={() => applyTemplate(shownPreview)}>
+                <Wand2 size={15} />
+                Customise &amp; use
+              </Button>
+            </>
+          )
+        }
+      >
+        {shownPreview && <LibraryPreview template={shownPreview} />}
+      </Modal>
+
+      <TemplateBuilder
+        open={builderOpen}
+        initial={builderInitial}
+        onClose={() => setBuilderOpen(false)}
+        onSaved={() => {
+          setBuilderOpen(false);
+          void queryClient.invalidateQueries({ queryKey: ["templates"] });
+          router.push("/campaigns/templates");
+        }}
+      />
+    </div>
+  );
+}
+
+function CategoryPill({ category }: { category: TemplateCategory }) {
+  const meta = CATEGORY_META[category];
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", meta.className)}>
+      {meta.label}
+    </span>
+  );
+}
+
+function LibraryCard({
+  template,
+  onPreview,
+  onUse,
+}: {
+  template: LibraryTemplate;
+  onPreview: () => void;
+  onUse: () => void;
+}) {
+  const draft = toDraft(template.components);
+  const header = headerFormatOf(template.components);
+  const HeaderIcon = header ? HEADER_ICONS[header] : undefined;
+  const IndustryIcon = INDUSTRY_ICONS[template.industry] ?? Building2;
+
+  return (
+    <HoverLift className="h-full">
+      <Spotlight className="flex h-full flex-col rounded-2xl border border-border/80 bg-white shadow-soft transition-[box-shadow,border-color] duration-300 hover:border-brand-200 hover:shadow-lift">
+        <button
+          type="button"
+          onClick={onPreview}
+          aria-label={`Preview ${template.title}`}
+          className="relative m-3 mb-0 h-48 overflow-hidden rounded-xl bg-[#f7f3fb] p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          style={{
+            backgroundImage: "radial-gradient(rgba(131,58,180,0.07) 1px, transparent 1px)",
+            backgroundSize: "16px 16px",
+          }}
+        >
+          <div className="origin-top-left transition-transform duration-500 ease-out group-hover:-translate-y-1 group-hover:scale-[1.02]">
+            <MessageBubble draft={draft} compact />
+          </div>
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#f7f3fb] to-transparent" />
+          <span className="absolute inset-0 grid place-items-center bg-white/0 transition-colors duration-300 group-hover:bg-white/35">
+            <span className="inline-flex translate-y-2 items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-brand-700 opacity-0 shadow-lift transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+              <Eye size={13} />
+              Quick preview
+            </span>
+          </span>
+        </button>
+
+        <div className="flex flex-1 flex-col p-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <CategoryPill category={template.category} />
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+              <IndustryIcon size={11} />
+              {industryLabel(template.industry)}
+            </span>
+            {template.source === "workspace" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-gradient px-2 py-0.5 text-[11px] font-semibold text-white">
+                <Sparkles size={10} />
+                Featured
+              </span>
+            )}
+          </div>
+          <h3 className="mt-2.5 line-clamp-2 font-display text-base font-semibold leading-snug tracking-tight">
+            {template.title}
+          </h3>
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+            {template.description ?? <RichText text={template.components.body?.text ?? ""} />}
+          </p>
+
+          <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+            <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+              {HeaderIcon && (
+                <span className="inline-flex items-center gap-1" title={`${header} header`}>
+                  <HeaderIcon size={12} />
+                  {header!.charAt(0) + header!.slice(1).toLowerCase()}
+                </span>
+              )}
+              {draft.buttons.length > 0 && (
+                <span className="inline-flex items-center gap-1" title="Buttons">
+                  <MousePointerClick size={12} />
+                  {draft.buttons.length}
+                </span>
+              )}
             </div>
-
-            <div className="mt-5 space-y-5">
-              {/* Technical Name & Meta Badges Box */}
-              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs space-y-2">
-                <h3 className="font-mono text-sm font-bold text-gray-900">
-                  {previewTemplate.technicalName}
-                </h3>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 uppercase">
-                    {previewTemplate.category}
-                  </span>
-                  <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 uppercase">
-                    APPROVED
-                  </span>
-                  <span className="text-gray-400 font-medium text-[11px]">
-                    Language: {previewTemplate.language}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 flex items-center gap-1.5 pt-1">
-                  <span>💬 {previewTemplate.componentsCount} components</span>
-                </p>
-              </div>
-
-              {/* WhatsApp Phone Mockup Container */}
-              <div className="rounded-3xl border border-emerald-100/80 bg-emerald-50/30 p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="grid h-6 w-6 place-items-center rounded-full bg-[#00C268] text-white">
-                    <MessageCircle size={14} className="fill-current" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-900 leading-tight">
-                      WhatsApp Preview
-                    </h4>
-                    <p className="text-[10px] text-gray-400">
-                      How your message will appear
-                    </p>
-                  </div>
-                </div>
-
-                {/* WhatsApp Chat Bubble Card Mockup */}
-                <div className="w-full max-w-sm mx-auto rounded-2xl border border-gray-200/70 bg-white shadow-md overflow-hidden">
-                  {/* WhatsApp Topbar */}
-                  <div className="bg-[#00C268] px-4 py-2.5 flex items-center justify-between text-white">
-                    <div className="flex items-center gap-2">
-                      <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-[#00C268] font-bold text-[10px]">
-                        B
-                      </span>
-                      <div>
-                        <p className="font-bold text-xs leading-tight">Business Account</p>
-                        <p className="text-[9px] text-emerald-100">Template Message</p>
-                      </div>
-                    </div>
-                    <MoreVertical size={14} className="text-white/80" />
-                  </div>
-
-                  {/* Bubble Body */}
-                  <div className="p-4 space-y-3 bg-[#f8fafc]/50 text-xs">
-                    {/* Header Type */}
-                    {previewTemplate.headerType && (
-                      <div className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600">
-                        <span>🖼️</span>
-                        <span>{previewTemplate.headerType} Header</span>
-                      </div>
-                    )}
-
-                    {/* Headline if present */}
-                    {previewTemplate.headline && (
-                      <p className="font-bold text-gray-900">
-                        {previewTemplate.headline}
-                      </p>
-                    )}
-
-                    {/* Body text */}
-                    <p className="text-gray-800 leading-relaxed">
-                      {renderHighlightedBody(previewTemplate.body)}
-                    </p>
-
-                    {/* Footer text */}
-                    {previewTemplate.footer && (
-                      <p className="italic text-gray-400 text-[11px]">
-                        {previewTemplate.footer}
-                      </p>
-                    )}
-
-                    {/* CTA Button Mock */}
-                    {previewTemplate.buttonText && (
-                      <div className="pt-2 border-t border-gray-100">
-                        <div className="flex items-center justify-center gap-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 py-2 font-bold text-xs shadow-2xs cursor-pointer transition-colors">
-                          <ExternalLink size={13} />
-                          <span>{previewTemplate.buttonText}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* WhatsApp Template watermark */}
-                    <div className="text-right text-[9px] text-gray-400 pt-1">
-                      WhatsApp Template
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const tpl = previewTemplate;
-                    setPreviewTemplate(null);
-                    handleUseTemplate(tpl);
-                  }}
-                  className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] transition-all"
-                >
-                  <Edit3 size={15} />
-                  <span>Edit and Create</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPreviewTemplate(null)}
-                  className="h-11 rounded-xl border border-gray-200 px-5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
+            <div className="flex items-center gap-1.5">
+              <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Preview ${template.title}`} onClick={onPreview}>
+                <Eye size={16} />
+              </Button>
+              <Button size="sm" onClick={onUse} className="group/use">
+                Use template
+                <ArrowRight size={14} className="transition-transform group-hover/use:translate-x-0.5" />
+              </Button>
             </div>
           </div>
         </div>
-      )}
+      </Spotlight>
+    </HoverLift>
+  );
+}
+
+function LibraryPreview({ template }: { template: LibraryTemplate }) {
+  const draft = toDraft(template.components);
+  const header = headerFormatOf(template.components);
+  const IndustryIcon = INDUSTRY_ICONS[template.industry] ?? Building2;
+
+  const details: { label: string; value: React.ReactNode }[] = [
+    { label: "Category", value: <CategoryPill category={template.category} /> },
+    {
+      label: "Industry",
+      value: (
+        <span className="inline-flex items-center gap-1.5">
+          <IndustryIcon size={14} className="text-brand-600" />
+          {industryLabel(template.industry)}
+        </span>
+      ),
+    },
+    { label: "Language", value: `${languageLabel(template.language)} (${template.language})` },
+    { label: "Header", value: header ? header.charAt(0) + header.slice(1).toLowerCase() : "None" },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+      <div className="rounded-3xl bg-aurora p-4 sm:p-6">
+        <TemplatePreview draft={draft} />
+      </div>
+      <div className="space-y-5">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">Template name</p>
+          <code className="mt-1 block break-all rounded-lg bg-brand-50 px-2.5 py-1.5 font-mono text-sm font-semibold text-brand-700">
+            {template.name}
+          </code>
+          {template.description && <p className="mt-2 text-sm text-muted-foreground">{template.description}</p>}
+        </div>
+        <dl className="grid grid-cols-2 gap-3">
+          {details.map((d) => (
+            <div key={d.label} className="rounded-xl border border-border/80 bg-white p-3">
+              <dt className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{d.label}</dt>
+              <dd className="mt-1 text-sm font-semibold">{d.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3.5 text-sm">
+          <p className="font-semibold text-brand-800">How it works</p>
+          <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-muted-foreground">
+            <li>Customise the wording, variables and buttons.</li>
+            <li>Save it as a draft in Your Templates.</li>
+            <li>Submit to Meta — approved templates can be used in campaigns.</li>
+          </ol>
+        </div>
+      </div>
     </div>
   );
 }

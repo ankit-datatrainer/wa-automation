@@ -263,9 +263,11 @@ async function resolveAudience(
   audienceType: string,
   config: Record<string, unknown>,
 ): Promise<string[]> {
-  const excludeOptedOut = (ids: string[]) => ids;
-
   switch (audienceType) {
+    // The CSV upload step imports the rows first, then passes the resulting
+    // ids — which are client-supplied, so they get the same org + opt-out
+    // filtering as a hand-picked contact list.
+    case "csv":
     case "contacts": {
       const ids = (config.contactIds as string[]) ?? [];
       const { data } = await supabaseAdmin
@@ -309,11 +311,6 @@ async function resolveAudience(
         .neq("opt_in_status", "opted_out")
         .in("id", candidateIds);
       return (data ?? []).map((c) => c.id);
-    }
-
-    case "csv": {
-      // The upload step imports the rows first, then passes the resulting ids.
-      return excludeOptedOut((config.contactIds as string[]) ?? []);
     }
 
     case "broadcast":

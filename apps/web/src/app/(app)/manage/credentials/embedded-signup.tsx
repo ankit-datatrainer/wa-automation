@@ -1,10 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, MessageCircle } from "lucide-react";
+import { CheckCircle2, Info, MessageCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/states";
+import { ease, motion } from "@/components/motion";
 import { api, ApiClientError } from "@/lib/api-client";
 
 interface EmbeddedSignupConfig {
@@ -154,41 +156,64 @@ export function EmbeddedSignup() {
     }
   };
 
-  if (config.isLoading) return null;
+  if (config.isLoading) return <Skeleton className="h-52" />;
 
   if (!config.data?.available) {
     return (
-      <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        One-click Meta signup isn&apos;t configured on this server yet. Set{" "}
-        <code>META_APP_ID</code>, <code>META_APP_SECRET</code> and <code>META_CONFIG_ID</code> to
-        enable it — until then, connect using the manual credentials below.
-      </p>
+      <div className="flex gap-3 rounded-2xl border border-dashed border-brand-200 bg-white/70 p-4 text-sm text-muted-foreground">
+        <Info size={18} className="mt-0.5 shrink-0 text-primary" />
+        <p>
+          One-click Meta signup isn&apos;t configured on this server yet. Set{" "}
+          <code className="rounded bg-brand-50 px-1 text-xs text-brand-800">META_APP_ID</code>,{" "}
+          <code className="rounded bg-brand-50 px-1 text-xs text-brand-800">META_APP_SECRET</code> and{" "}
+          <code className="rounded bg-brand-50 px-1 text-xs text-brand-800">META_CONFIG_ID</code> to enable
+          it — until then, connect using the manual credentials below.
+        </p>
+      </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-primary/30 bg-accent p-5">
-      <div className="flex items-start gap-3">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
-          <MessageCircle size={20} />
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease }}
+      className="relative overflow-hidden rounded-2xl border border-brand-200 bg-white p-6 shadow-soft"
+    >
+      <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-brand-gradient" />
+      <div aria-hidden className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-brand-pink/15 blur-3xl" />
+
+      <div className="relative flex items-start gap-4">
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+          <MessageCircle size={22} />
         </span>
-        <div className="flex-1">
-          <p className="font-bold">Connect with Meta</p>
-          <p className="text-sm text-muted-foreground">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-display text-lg font-semibold">Connect with Meta</p>
+            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary">
+              Recommended
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
             Sign in with Facebook, pick or create a WhatsApp Business Account, and we handle the
             rest — no manual tokens.
           </p>
         </div>
       </div>
 
-      <Button
-        className="mt-4 w-full"
-        loading={connecting}
-        onClick={startSignup}
-      >
-        {!connecting && <CheckCircle2 size={16} />}
+      <ul className="relative mt-4 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+        {["No token copy-paste", "Webhooks auto-subscribed", "Takes about 2 minutes"].map((item) => (
+          <li key={item} className="flex items-center gap-1.5 text-foreground/80">
+            <CheckCircle2 size={14} className="shrink-0 text-primary" />
+            {item}
+          </li>
+        ))}
+      </ul>
+
+      <Button className="relative mt-5 w-full" size="lg" loading={connecting} onClick={startSignup}>
+        {!connecting && <CheckCircle2 size={17} />}
         Connect WhatsApp with Meta
       </Button>
-    </div>
+    </motion.div>
   );
 }

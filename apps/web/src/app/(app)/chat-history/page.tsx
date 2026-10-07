@@ -1,556 +1,419 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  CheckCheck,
-  FileText,
-  Filter,
-  Image as ImageIcon,
-  MessageCircle,
-  MessageSquare,
-  Paperclip,
-  Search,
-  Send,
-  Smile,
-  Sparkles,
-  User,
-  X,
-  Phone,
-  Clock,
-} from "lucide-react";
-import { toast } from "sonner";
-import { api } from "@/lib/api-client";
-import { initials } from "@/lib/utils";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCheck, FileText, Inbox, MessageCircle, MessagesSquare, Search, Timer, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { PageHeader } from "@/components/layout/page-header";
+import { AnimatedNumber, AnimatePresence, ease, motion, SegmentedTabs, Stagger, StaggerItem } from "@/components/motion";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { LoadingScreen } from "@/components/ui/loading-screen";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
+import { api, ApiClientError } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { ContactAvatar, formatPhone, isUuid, toOne, useDebounced } from "../contacts/ui";
+import { dayLabel, listTime, sessionInfo } from "./format";
+import { Transcript, type TranscriptContact } from "./transcript";
 
-interface Contact {
-  id: string;
-  wa_id: string;
-  name: string | null;
-}
+type Filter = "all" | "unread" | "active";
 
 interface ConversationItem {
   id: string;
   status: string;
   assigned_to: string | null;
   unread_count: number;
-  last_message_at: string;
-  last_message_preview: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
   session_expires_at: string | null;
-  contacts: Contact;
-  dateGroup?: string;
-  displayTime?: string;
+  contacts: unknown;
 }
 
-interface MessageItem {
-  id: string;
-  direction: "inbound" | "outbound";
-  type: "text" | "template" | "image";
-  content: {
-    text?: string;
-    templateName?: string;
-    mediaUrl?: string;
-  };
-  sent_at: string;
-  status: "sent" | "delivered" | "read";
-}
-
-const DEFAULT_CONVERSATIONS: ConversationItem[] = [
-  {
-    id: "conv1",
-    status: "open",
-    assigned_to: null,
-    unread_count: 1,
-    last_message_at: "2026-08-19T17:21:00.000Z",
-    last_message_preview: "No messages yet",
-    session_expires_at: null,
-    contacts: { id: "c1", wa_id: "7738293629", name: null },
-    dateGroup: "TODAY",
-    displayTime: "5:21 PM",
-  },
-  {
-    id: "conv2",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-18T14:30:00.000Z",
-    last_message_preview: "Thank you for reaching out!",
-    session_expires_at: "2026-08-20T14:30:00.000Z",
-    contacts: { id: "c4", wa_id: "7428720768", name: "Ayush" },
-    dateGroup: "YESTERDAY",
-    displayTime: "Yesterday",
-  },
-  {
-    id: "conv3",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-18T11:15:00.000Z",
-    last_message_preview: "Sent a template message",
-    session_expires_at: null,
-    contacts: { id: "c6", wa_id: "9540724184", name: "Sagar" },
-    dateGroup: "YESTERDAY",
-    displayTime: "Yesterday",
-  },
-  {
-    id: "conv4",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-18T09:45:00.000Z",
-    last_message_preview: "Sent a template message",
-    session_expires_at: null,
-    contacts: { id: "c3", wa_id: "9811110594", name: "Piyush A" },
-    dateGroup: "YESTERDAY",
-    displayTime: "Yesterday",
-  },
-  {
-    id: "conv5",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-11T16:20:00.000Z",
-    last_message_preview: "Sent a template message",
-    session_expires_at: null,
-    contacts: { id: "c5", wa_id: "7838349247", name: "Ankit Kumar" },
-    dateGroup: "AUGUST 11",
-    displayTime: "Aug 11",
-  },
-  {
-    id: "conv6",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-10T12:00:00.000Z",
-    last_message_preview: "No messages yet",
-    session_expires_at: null,
-    contacts: { id: "c2", wa_id: "8928814237", name: null },
-    dateGroup: "AUGUST 10",
-    displayTime: "Aug 10",
-  },
-  {
-    id: "conv7",
-    status: "open",
-    assigned_to: null,
-    unread_count: 0,
-    last_message_at: "2026-08-09T18:00:00.000Z",
-    last_message_preview: "Sent a template message",
-    session_expires_at: null,
-    contacts: { id: "c7", wa_id: "9636480218", name: "9636480218" },
-    dateGroup: "AUGUST 09",
-    displayTime: "Aug 09",
-  },
-];
-
-const INITIAL_MESSAGES_BY_CONV: Record<string, MessageItem[]> = {
-  conv2: [
-    {
-      id: "m1",
-      direction: "inbound",
-      type: "text",
-      content: { text: "Hi, I wanted to inquire about WhatsApp Automation features for our brand." },
-      sent_at: "Yesterday, 2:28 PM",
-      status: "read",
-    },
-    {
-      id: "m2",
-      direction: "outbound",
-      type: "text",
-      content: { text: "Thank you for reaching out! We offer full Meta Cloud API integration, chatbots, and broadcast campaigns." },
-      sent_at: "Yesterday, 2:30 PM",
-      status: "read",
-    },
-  ],
-  conv3: [
-    {
-      id: "m3",
-      direction: "outbound",
-      type: "template",
-      content: {
-        templateName: "welcome_brand",
-        text: "Welcome to WA Automation! Empowering your brand with official WhatsApp automation.",
-      },
-      sent_at: "Yesterday, 11:15 AM",
-      status: "delivered",
-    },
-  ],
-  conv4: [
-    {
-      id: "m4",
-      direction: "outbound",
-      type: "template",
-      content: {
-        templateName: "order_update",
-        text: "Hello Piyush, your order has been received and is being processed.",
-      },
-      sent_at: "Yesterday, 9:45 AM",
-      status: "read",
-    },
-  ],
-  conv5: [
-    {
-      id: "m5",
-      direction: "outbound",
-      type: "template",
-      content: {
-        templateName: "diwali_offer",
-        text: "🎉 Special festive discount offer for your account.",
-      },
-      sent_at: "Aug 11, 4:20 PM",
-      status: "delivered",
-    },
-  ],
-};
+const LIMIT = 100;
 
 export default function ChatHistoryPage() {
-  const [search, setSearch] = useState("");
-  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
-  const [messageInput, setMessageInput] = useState("");
-  const [localMessages, setLocalMessages] = useState<Record<string, MessageItem[]>>(INITIAL_MESSAGES_BY_CONV);
+  return (
+    <Suspense fallback={null}>
+      <ChatHistory />
+    </Suspense>
+  );
+}
 
-  const convQuery = useQuery({
-    queryKey: ["conversations"],
-    queryFn: () => api.get<{ data: ConversationItem[] }>("/conversations"),
+function ChatHistory() {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const selectedId = searchParams.get("conversation");
+
+  const [filter, setFilter] = useState<Filter>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebounced(searchInput.trim(), 300);
+
+  const list = useQuery({
+    queryKey: ["conversations", { filter, search, limit: LIMIT }],
+    queryFn: () =>
+      api.get<{ data: ConversationItem[] }>("/conversations", {
+        filter,
+        search: search || undefined,
+        limit: LIMIT,
+      }),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
   });
 
-  const allConversations: ConversationItem[] = useMemo(() => {
-    const apiData = convQuery.data?.data;
-    if (apiData && apiData.length >= 7) {
-      return apiData.map((c, i) => ({
-        ...c,
-        dateGroup: i === 0 ? "TODAY" : i < 4 ? "YESTERDAY" : "AUGUST 11",
-        displayTime: i === 0 ? "5:21 PM" : i < 4 ? "Yesterday" : "Aug 11",
-      }));
-    }
-    return DEFAULT_CONVERSATIONS;
-  }, [convQuery.data]);
+  // Unfiltered snapshot for the KPI tiles (shares cache with the "All" tab).
+  const overview = useQuery({
+    queryKey: ["conversations", { filter: "all", search: "", limit: LIMIT }],
+    queryFn: () => api.get<{ data: ConversationItem[] }>("/conversations", { filter: "all", limit: LIMIT }),
+    refetchInterval: 30_000,
+  });
 
-  const filteredConversations = useMemo(() => {
-    if (!search.trim()) return allConversations;
-    const q = search.toLowerCase();
-    return allConversations.filter(
-      (c) =>
-        (c.contacts?.name && c.contacts.name.toLowerCase().includes(q)) ||
-        (c.contacts?.wa_id && c.contacts.wa_id.includes(q)) ||
-        (c.last_message_preview && c.last_message_preview.toLowerCase().includes(q))
-    );
-  }, [allConversations, search]);
+  // With no real conversations the API answers with sample ones (ids like
+  // "conv1"); never show those as the account's own chats.
+  const rows = useMemo(() => (list.data?.data ?? []).filter((c) => isUuid(c.id)), [list.data]);
+  const allRows = useMemo(() => (overview.data?.data ?? []).filter((c) => isUuid(c.id)), [overview.data]);
+  const stats = useMemo(
+    () => ({
+      total: allRows.length,
+      unread: allRows.reduce((sum, c) => sum + (c.unread_count > 0 ? 1 : 0), 0),
+      active: allRows.filter((c) => sessionInfo(c.session_expires_at).open).length,
+    }),
+    [allRows],
+  );
 
-  // Group by dateGroup
-  const groupedConversations = useMemo(() => {
+  const grouped = useMemo(() => {
     const groups: { label: string; items: ConversationItem[] }[] = [];
-    const map = new Map<string, ConversationItem[]>();
-
-    for (const item of filteredConversations) {
-      const g = item.dateGroup || "RECENT";
-      if (!map.has(g)) {
-        map.set(g, []);
-      }
-      map.get(g)!.push(item);
+    for (const c of rows) {
+      const label = dayLabel(c.last_message_at);
+      const last = groups[groups.length - 1];
+      if (last && last.label === label) last.items.push(c);
+      else groups.push({ label, items: [c] });
     }
-
-    for (const [label, items] of map.entries()) {
-      groups.push({ label, items });
-    }
-
     return groups;
-  }, [filteredConversations]);
+  }, [rows]);
 
-  const selectedConv = allConversations.find((c) => c.id === selectedConvId);
-  const currentMessages = selectedConvId ? localMessages[selectedConvId] || [] : [];
-
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!messageInput.trim() || !selectedConvId) return;
-
-    const newMsg: MessageItem = {
-      id: `msg-${Date.now()}`,
-      direction: "outbound",
-      type: "text",
-      content: { text: messageInput.trim() },
-      sent_at: "Just now",
-      status: "sent",
-    };
-
-    setLocalMessages((prev) => ({
-      ...prev,
-      [selectedConvId]: [...(prev[selectedConvId] || []), newMsg],
-    }));
-
-    setMessageInput("");
-    toast.success("Message sent");
+  const select = (id: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) params.set("conversation", id);
+    else params.delete("conversation");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
+  // On wide screens open the most recent conversation by default.
+  useEffect(() => {
+    if (selectedId || rows.length === 0) return;
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+      select(rows[0]!.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, selectedId]);
+
+  const selected =
+    rows.find((c) => c.id === selectedId) ?? allRows.find((c) => c.id === selectedId) ?? null;
+  const selectedContact = selected ? toOne<TranscriptContact>(selected.contacts) : null;
+
+  const tiles = [
+    { label: "Conversations", value: stats.total, icon: MessagesSquare, tint: "from-brand-600 to-brand-magenta" },
+    { label: "Unread", value: stats.unread, icon: MessageCircle, tint: "from-brand-pink to-brand-orange" },
+    { label: "Open 24h windows", value: stats.active, icon: Timer, tint: "from-emerald-500 to-teal-500" },
+  ];
+
   return (
-    <div className="w-full max-w-[1600px] mx-auto h-[calc(100vh-120px)] min-h-[640px] font-poppins flex rounded-3xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-      <LoadingScreen isLoading={convQuery.isLoading} />
+    // Fills the viewport below the 72px topbar (minus <main>'s padding) so the
+    // list and transcript scroll on their own and the page itself does not.
+    <div className="flex h-[calc(100dvh-72px-2rem)] min-h-[680px] flex-col sm:h-[calc(100dvh-72px-3rem)] lg:h-[calc(100dvh-72px-4rem)]">
+      <LoadingScreen isLoading={list.isLoading} minDurationMs={600} />
 
-      {/* ========================================================= */}
-      {/* 1. Left Sidebar Panel (Conversation List) */}
-      {/* ========================================================= */}
-      <div className="w-full md:w-80 lg:w-96 border-r border-gray-100 flex flex-col shrink-0 bg-white">
-        {/* Header */}
-        <div className="p-5 pb-3 border-b border-gray-100/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <MessageCircle size={22} className="text-[#00C268]" />
-              <div>
-                <h2 className="text-base font-bold text-gray-900 leading-none">Chat History</h2>
-                <p className="text-[11px] text-gray-500 font-medium mt-1">
-                  {allConversations.length} conversations
-                </p>
+      <PageHeader
+        title="Chat History"
+        description="Every WhatsApp conversation with full transcripts — search, filter and reply while the 24-hour window is open."
+        onRefresh={() => {
+          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          void queryClient.invalidateQueries({ queryKey: ["messages"] });
+        }}
+        refreshing={list.isFetching && !list.isLoading}
+        actions={
+          <Link href="/inbox" className={buttonVariants({ variant: "outline" })}>
+            <Inbox size={16} />
+            Open Inbox
+          </Link>
+        }
+      />
+
+      <Stagger className="mb-5 grid shrink-0 grid-cols-3 gap-2.5 sm:gap-4" stagger={0.07}>
+        {tiles.map((tile) => (
+          <StaggerItem key={tile.label} whileHover={{ y: -3 }}>
+            <div className="flex items-center gap-3 rounded-2xl border border-border/80 bg-white p-3 shadow-soft transition-shadow hover:shadow-lift sm:p-4">
+              <span
+                className={cn(
+                  "hidden h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-[0_8px_20px_-8px_rgba(131,58,180,0.6)] sm:grid",
+                  tile.tint,
+                )}
+              >
+                <tile.icon size={19} />
+              </span>
+              <div className="min-w-0">
+                <div className="font-display text-xl font-bold tracking-tight sm:text-2xl">
+                  {overview.isLoading ? <Skeleton className="h-7 w-10" /> : <AnimatedNumber value={tile.value} />}
+                </div>
+                <p className="truncate text-[11px] font-semibold text-muted-foreground sm:text-xs">{tile.label}</p>
               </div>
             </div>
+          </StaggerItem>
+        ))}
+      </Stagger>
 
-            <button
-              type="button"
-              aria-label="Filter"
-              className="grid h-8 w-8 place-items-center rounded-xl border border-gray-200/80 bg-white text-gray-500 hover:bg-gray-50 transition-colors"
-            >
-              <Filter size={14} />
-            </button>
-          </div>
-
-          {/* Search box */}
-          <div className="relative mt-3.5">
-            <Search
-              size={14}
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-            <input
-              type="text"
-              placeholder="Search conversations..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-9 w-full rounded-xl border border-gray-200/80 bg-gray-50/50 pl-9 pr-3 text-xs text-gray-800 placeholder:text-gray-400 shadow-2xs outline-none focus:border-[#00C268] focus:bg-white focus:ring-2 focus:ring-[#00C268]/20 transition-all"
-            />
-          </div>
-        </div>
-
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-50 p-2 scrollbar-thin">
-          {groupedConversations.map((group) => (
-            <div key={group.label} className="py-2">
-              <div className="px-3 py-1.5 text-[10px] font-bold tracking-wider text-gray-400 uppercase">
-                {group.label}
+      <motion.div
+        className="flex min-h-0 flex-1 flex-col"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease, delay: 0.1 }}
+      >
+        <Card className="flex min-h-[420px] flex-1 overflow-hidden">
+          {/* Conversation list */}
+          <aside
+            className={cn(
+              "flex w-full min-w-0 flex-col border-r border-border/70 bg-white md:w-[340px] md:shrink-0 lg:w-[380px]",
+              selectedId ? "hidden md:flex" : "flex",
+            )}
+          >
+            <div className="space-y-3 border-b border-border/70 p-3 sm:p-4">
+              <div className="relative">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  aria-label="Search conversations"
+                  placeholder="Search name or number…"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="h-10 pl-10 pr-9"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => setSearchInput("")}
+                    className="absolute right-1.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-brand-50 hover:text-primary"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
-
-              <div className="space-y-1 mt-0.5">
-                {group.items.map((conv) => {
-                  const isSelected = selectedConvId === conv.id;
-                  const contactName = conv.contacts.name || "Unknown";
-                  const initialLetter = conv.contacts.name ? initials(conv.contacts.name, "U") : "U";
-
-                  return (
-                    <button
-                      key={conv.id}
-                      type="button"
-                      onClick={() => setSelectedConvId(conv.id)}
-                      className={`w-full flex items-center gap-3 rounded-2xl p-3 text-left transition-all ${
-                        isSelected
-                          ? "bg-emerald-50/70 border border-emerald-200/60 shadow-2xs"
-                          : "hover:bg-gray-50/80 border border-transparent"
-                      }`}
-                    >
-                      {/* Avatar */}
-                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#00C268]/15 text-[#00C268] text-sm font-bold shadow-2xs">
-                        {initialLetter}
-                      </span>
-
-                      {/* Content */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <p className="truncate text-xs font-bold text-gray-900">
-                            {contactName}
-                          </p>
-                          <span className="text-[10px] text-gray-400 font-medium shrink-0">
-                            {conv.displayTime}
+              <SegmentedTabs<Filter>
+                layoutId="chat-history-filter"
+                value={filter}
+                onChange={setFilter}
+                className="grid w-full grid-cols-3"
+                tabs={[
+                  { value: "all", label: "All" },
+                  {
+                    value: "unread",
+                    label: (
+                      <span className="inline-flex items-center gap-1.5">
+                        Unread
+                        {stats.unread > 0 && (
+                          <span className="grid h-4 min-w-4 place-items-center rounded-full bg-brand-gradient px-1 text-[10px] font-bold text-white">
+                            {stats.unread}
                           </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 mt-1">
-                          {conv.last_message_preview?.includes("Thank you") && (
-                            <CheckCheck size={13} className="text-[#00C268] shrink-0" />
-                          )}
-                          {conv.last_message_preview?.toLowerCase().includes("template") && (
-                            <FileText size={12} className="text-gray-400 shrink-0" />
-                          )}
-                          <p className="truncate text-[11px] text-gray-500">
-                            {conv.last_message_preview || "No messages yet"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {conv.unread_count > 0 && (
-                        <span className="grid h-4 w-4 place-items-center rounded-full bg-[#00C268] text-[9px] font-bold text-white shrink-0">
-                          {conv.unread_count}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 2. Main Center Panel (Welcome state or Active Chat) */}
-      {/* ========================================================= */}
-      <div className="flex-1 flex flex-col bg-[#FCFCFD]">
-        {!selectedConv ? (
-          /* Empty / Welcome State matching screenshot */
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            {/* Center Icon Box */}
-            <div className="relative">
-              <div className="w-24 h-24 rounded-3xl bg-[#00C268] text-white flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <MessageSquare size={44} className="fill-white/20 stroke-white" />
-              </div>
-              {/* Star Badge on Top Right */}
-              <div className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-amber-400 text-white flex items-center justify-center shadow-md">
-                <Sparkles size={16} className="fill-white" />
-              </div>
-            </div>
-
-            {/* Heading & Subtitle */}
-            <h3 className="text-xl font-extrabold text-gray-900 tracking-tight mt-6">
-              Welcome to Complete Conversation History
-            </h3>
-            <p className="text-xs text-gray-500 mt-1 max-w-sm">
-              Select a conversation to start messaging.
-            </p>
-
-            {/* Unread Message Pill */}
-            <div className="mt-6 flex items-center gap-2 rounded-full border border-emerald-200 bg-[#ecfdf5] px-5 py-2 text-xs font-bold text-[#00C268] shadow-2xs">
-              <span className="h-2 w-2 rounded-full bg-[#00C268] animate-pulse" />
-              <span>You have 1 unread message</span>
-            </div>
-          </div>
-        ) : (
-          /* Active Chat View */
-          <div className="flex-1 flex flex-col h-full bg-white">
-            {/* Chat Topbar */}
-            <div className="h-16 px-6 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-full bg-[#00C268] text-white font-bold text-sm shadow-xs">
-                  {selectedConv.contacts.name ? initials(selectedConv.contacts.name, "U") : "U"}
-                </span>
-                <div>
-                  <h3 className="text-sm font-bold text-gray-900 leading-tight">
-                    {selectedConv.contacts.name || "Unknown Customer"}
-                  </h3>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[11px] text-gray-500 font-mono">
-                      +{selectedConv.contacts.wa_id}
-                    </span>
-                    <span className="flex items-center gap-1 text-[10px] text-[#00C268] font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#00C268]" />
-                      Session Active
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedConvId(null)}
-                  className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Message Feed */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#f8fafc]/50 scrollbar-thin">
-              <div className="text-center">
-                <span className="rounded-full bg-white border border-gray-200/80 px-3 py-1 text-[10px] font-semibold text-gray-400 shadow-2xs">
-                  {selectedConv.dateGroup || "YESTERDAY"}
-                </span>
-              </div>
-
-              {currentMessages.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 text-xs">
-                  No message history yet for this contact.
-                </div>
-              ) : (
-                currentMessages.map((msg) => {
-                  const isOut = msg.direction === "outbound";
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col ${isOut ? "items-end" : "items-start"}`}
-                    >
-                      <div
-                        className={`max-w-md rounded-2xl p-3.5 text-xs leading-relaxed shadow-xs ${
-                          isOut
-                            ? "bg-[#00C268] text-white rounded-br-xs"
-                            : "bg-white text-gray-800 border border-gray-100 rounded-bl-xs"
-                        }`}
-                      >
-                        {msg.type === "template" && (
-                          <div className="mb-1 text-[10px] font-bold uppercase opacity-80 flex items-center gap-1">
-                            <FileText size={10} />
-                            <span>Template: {msg.content.templateName}</span>
-                          </div>
                         )}
-                        <p>{msg.content.text}</p>
-                        <div
-                          className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-                            isOut ? "text-emerald-100" : "text-gray-400"
-                          }`}
-                        >
-                          <span>{msg.sent_at}</span>
-                          {isOut && <CheckCheck size={13} className="text-white" />}
-                        </div>
+                      </span>
+                    ),
+                  },
+                  { value: "active", label: "Active" },
+                ]}
+              />
+            </div>
+
+            <div
+              className={cn(
+                "scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2 transition-opacity",
+                list.isPlaceholderData && "opacity-60",
+              )}
+            >
+              {list.isError ? (
+                <div className="p-2">
+                  <ErrorState
+                    message={list.error instanceof ApiClientError ? list.error.message : "Could not load conversations."}
+                    onRetry={() => void list.refetch()}
+                  />
+                </div>
+              ) : list.isLoading ? (
+                <div className="space-y-2 p-1">
+                  {Array.from({ length: 7 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 p-2">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-1/2" />
+                        <Skeleton className="h-3 w-3/4" />
                       </div>
                     </div>
-                  );
-                })
+                  ))}
+                </div>
+              ) : rows.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+                  <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 text-primary">
+                    <MessagesSquare size={22} />
+                  </span>
+                  <p className="mt-3 font-display text-base font-semibold">
+                    {search || filter !== "all" ? "No conversations found" : "No conversations yet"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {search || filter !== "all"
+                      ? "Try another search or filter."
+                      : "Chats appear here when a contact messages you or you start one from Contacts."}
+                  </p>
+                  {!search && filter === "all" && (
+                    <Link href="/contacts" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-4")}>
+                      Go to Contacts
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                grouped.map((group) => (
+                  <div key={group.label} className="pb-1">
+                    <p className="px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                      {group.label}
+                    </p>
+                    {group.items.map((conv) => {
+                      const contact = toOne<TranscriptContact>(conv.contacts);
+                      const active = conv.id === selectedId;
+                      const preview = conv.last_message_preview || "No messages yet";
+                      const isTemplate = /template/i.test(preview);
+                      const session = sessionInfo(conv.session_expires_at);
+                      const flatIndex = rows.indexOf(conv);
+                      return (
+                        <motion.button
+                          key={conv.id}
+                          type="button"
+                          onClick={() => select(conv.id)}
+                          initial={flatIndex < 20 ? { opacity: 0, x: -8 } : false}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.3, ease, delay: flatIndex < 20 ? flatIndex * 0.025 : 0 }}
+                          aria-current={active ? "true" : undefined}
+                          className={cn(
+                            "relative flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                            active ? "text-foreground" : "hover:bg-brand-50/60",
+                          )}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="chat-history-active"
+                              className="absolute inset-0 rounded-xl border border-brand-200 bg-brand-50"
+                              transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                            />
+                          )}
+                          <span className="relative">
+                            <ContactAvatar name={contact?.name} waId={contact?.wa_id} seed={contact?.id ?? conv.id} />
+                            {session.open && (
+                              <span
+                                title="24-hour window open"
+                                className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500"
+                              />
+                            )}
+                          </span>
+                          <span className="relative min-w-0 flex-1">
+                            <span className="flex items-baseline justify-between gap-2">
+                              <span
+                                className={cn(
+                                  "truncate text-sm",
+                                  conv.unread_count > 0 ? "font-bold" : "font-semibold",
+                                )}
+                              >
+                                {contact?.name || formatPhone(contact?.wa_id)}
+                              </span>
+                              <span
+                                className={cn(
+                                  "shrink-0 text-[11px]",
+                                  conv.unread_count > 0 ? "font-semibold text-primary" : "text-muted-foreground",
+                                )}
+                              >
+                                {listTime(conv.last_message_at)}
+                              </span>
+                            </span>
+                            <span className="mt-0.5 flex items-center gap-1.5">
+                              {isTemplate ? (
+                                <FileText size={12} className="shrink-0 text-muted-foreground" />
+                              ) : conv.unread_count === 0 && conv.last_message_preview ? (
+                                <CheckCheck size={13} className="shrink-0 text-muted-foreground/70" />
+                              ) : null}
+                              <span
+                                className={cn(
+                                  "truncate text-xs",
+                                  conv.unread_count > 0 ? "font-medium text-foreground/80" : "text-muted-foreground",
+                                )}
+                              >
+                                {preview}
+                              </span>
+                              {conv.unread_count > 0 && (
+                                <span className="ml-auto grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-brand-gradient px-1.5 text-[10px] font-bold text-white shadow-glow">
+                                  {conv.unread_count}
+                                </span>
+                              )}
+                            </span>
+                          </span>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                ))
               )}
             </div>
+            {rows.length >= LIMIT && (
+              <p className="border-t border-border/70 px-4 py-2 text-center text-[11px] text-muted-foreground">
+                Showing the {LIMIT} most recent conversations.
+              </p>
+            )}
+          </aside>
 
-            {/* Chat Composer */}
-            <form
-              onSubmit={handleSendMessage}
-              className="p-4 border-t border-gray-100 bg-white flex items-center gap-3 shrink-0"
-            >
-              <button
-                type="button"
-                className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <Smile size={18} />
-              </button>
-              <button
-                type="button"
-                className="grid h-9 w-9 place-items-center rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <Paperclip size={18} />
-              </button>
-
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                className="flex-1 h-10 rounded-xl border border-gray-200/80 bg-gray-50/50 px-4 text-xs text-gray-800 placeholder:text-gray-400 outline-none focus:border-[#00C268] focus:bg-white focus:ring-2 focus:ring-[#00C268]/20 transition-all"
-              />
-
-              <button
-                type="submit"
-                disabled={!messageInput.trim()}
-                className="flex h-10 items-center gap-1.5 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] disabled:opacity-40 transition-colors"
-              >
-                <Send size={14} />
-                <span>Send</span>
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
+          {/* Transcript */}
+          <section className={cn("min-w-0 flex-1 bg-brand-50/20", selectedId ? "flex flex-col" : "hidden md:flex md:flex-col")}>
+            <AnimatePresence mode="wait" initial={false}>
+              {selectedId ? (
+                <motion.div
+                  key={selectedId}
+                  className="flex h-full min-h-0 flex-col"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.25, ease }}
+                >
+                  <Transcript
+                    conversationId={selectedId}
+                    contact={selectedContact}
+                    unreadCount={selected?.unread_count ?? 0}
+                    sessionExpiresAt={selected?.session_expires_at ?? null}
+                    onBack={() => select(null)}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="empty"
+                  className="grid h-full place-items-center bg-aurora"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <EmptyState
+                    icon={MessagesSquare}
+                    title="Pick a conversation"
+                    description={
+                      stats.unread > 0
+                        ? `You have ${stats.unread} unread conversation${stats.unread === 1 ? "" : "s"}. Select one to read the full transcript.`
+                        : "Select a conversation on the left to read its full transcript."
+                    }
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        </Card>
+      </motion.div>
     </div>
   );
 }

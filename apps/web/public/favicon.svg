@@ -1,43 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="128" height="128">
   <defs>
-    <linearGradient id="waGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00E67A" />
-      <stop offset="50%" stop-color="#00C268" />
-      <stop offset="100%" stop-color="#009A52" />
+    <linearGradient id="g" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D28D9" />
+      <stop offset="0.45" stop-color="#833AB4" />
+      <stop offset="0.8" stop-color="#C13584" />
+      <stop offset="1" stop-color="#E1306C" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#00C268" flood-opacity="0.35" />
-    </filter>
   </defs>
-
-  <!-- Background Squircle -->
-  <rect x="8" y="8" width="112" height="112" rx="30" ry="30" fill="url(#waGrad)" filter="url(#shadow)" />
-
-  <!-- Inner Subtle Border -->
-  <rect x="9.5" y="9.5" width="109" height="109" rx="28.5" ry="28.5" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.3" />
-
-  <!-- WhatsApp Speech Bubble Base -->
-  <path
-    d="M64 26 C43.01 26 26 43.01 26 64 C26 71.2 28.01 77.95 31.5 83.7 L27 101 L44.8 96.6 C50.35 99.98 56.9 102 64 102 C84.99 102 102 84.99 102 64 C102 43.01 84.99 26 64 26 Z"
-    fill="#FFFFFF"
-  />
-
-  <!-- Green Inner Bubble Detail -->
-  <path
-    d="M64 33 C46.88 33 33 46.88 33 64 C33 69.88 34.64 75.4 37.5 80.1 L33.8 94.2 L48.3 90.6 C52.84 93.36 58.2 95 64 95 C81.12 95 95 81.12 95 64 C95 46.88 81.12 33 64 33 Z"
-    fill="url(#waGrad)"
-  />
-
-  <!-- Bold White Verified Automation Checkmark -->
-  <path
-    d="M51 63.5 L60 72.5 L77.5 53"
-    fill="none"
-    stroke="#FFFFFF"
-    stroke-width="7.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-
-  <!-- Top Right Accent Sparkle -->
-  <circle cx="98" cy="28" r="4.5" fill="#FFD233" />
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#g)" />
+  <path d="M32 15c-9.94 0-18 7.16-18 16 0 4.3 1.9 8.2 5 11.08L17.5 49l7.6-3.3A19.7 19.7 0 0 0 32 47c9.94 0 18-7.16 18-16s-8.06-16-18-16Z" fill="#fff" />
+  <path d="m24.5 31.5 5 5 10-10" stroke="url(#g)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <circle cx="49.5" cy="14.5" r="3.5" fill="#FCAF45" />
 </svg>

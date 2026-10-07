@@ -1,34 +1,45 @@
 "use client";
 
-import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown,
+  ArrowDownLeft,
+  ArrowUpRight,
   Building2,
-  Calendar,
-  Camera,
-  ChevronRight,
+  CalendarDays,
   Clock,
   CreditCard,
-  Edit2,
+  Fingerprint,
+  Globe,
+  KeyRound,
+  LifeBuoy,
+  LogOut,
   Mail,
-  MapPin,
   MessageSquare,
   Phone,
-  Shield,
-  Upload,
+  ShieldAlert,
+  ShieldCheck,
   User,
   Wallet,
-  X,
 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Field, Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/states";
-import { Switch } from "@/components/ui/switch";
+import { Field, Input, PasswordInput } from "@/components/ui/input";
+import { ErrorState, Skeleton } from "@/components/ui/states";
+import { AnimatedNumber, AnimatePresence, ease, motion } from "@/components/motion";
 import { api, ApiClientError } from "@/lib/api-client";
-import { formatCurrency, initials } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { cn, formatCurrency, initials } from "@/lib/utils";
+import {
+  formatDate,
+  InfoRow,
+  SettingsSection,
+  StickySaveBar,
+} from "../_components/settings-kit";
 
 interface ProfileData {
   user: {
@@ -62,714 +73,723 @@ interface ProfileData {
     role: string;
     countryId: number;
     agentId: string | null;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: string | null;
+    updatedAt: string | null;
     isDemo: boolean;
-    demoExpiresAt: string;
+    demoExpiresAt: string | null;
   };
 }
 
+type Tab = "personal" | "security" | "billing" | "account";
+
+const TABS: { value: Tab; label: string; description: string; icon: typeof User }[] = [
+  { value: "personal", label: "Personal information", description: "Your name, number and company.", icon: User },
+  { value: "security", label: "Password & security", description: "Change password, sign out devices.", icon: ShieldCheck },
+  { value: "billing", label: "Billing & balance", description: "Wallet balance and message pricing.", icon: CreditCard },
+  { value: "account", label: "Account details", description: "Role, IDs and important dates.", icon: Fingerprint },
+];
+
+const FORM_ID = "profile-form";
+
 export default function UserProfilePage() {
-  const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"personal" | "billing" | "account">("personal");
+  const [tab, setTab] = useState<Tab>("personal");
 
-  // 2FA states
-  const [twoFactorMaster, setTwoFactorMaster] = useState(false);
-  const [emailAuthEnabled, setEmailAuthEnabled] = useState(false);
-  const [googleAuthModal, setGoogleAuthModal] = useState(false);
-  const [phoneAuthModal, setPhoneAuthModal] = useState(false);
-  const [verificationCodeSent, setVerificationCodeSent] = useState(false);
+  // Deep-link support: /manage/profile#security
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "") as Tab;
+    if (TABS.some((t) => t.value === hash)) setTab(hash);
+  }, []);
 
-  // Edit form states
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [mobile, setMobile] = useState("");
-  const [city, setCity] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [country, setCountry] = useState("");
+  const changeTab = (value: Tab) => {
+    setTab(value);
+    window.history.replaceState(null, "", `#${value}`);
+  };
 
   const profile = useQuery({
     queryKey: ["settings", "profile"],
     queryFn: () => api.get<ProfileData>("/settings/profile"),
   });
 
-  const updateProfile = useMutation({
+  const data = profile.data;
+
+  return (
+    <>
+      <PageHeader title="User Profile" description="Manage your personal details, security and billing." />
+
+      {profile.isError ? (
+        <ErrorState
+          message={
+            profile.error instanceof ApiClientError ? profile.error.message : "Could not load your profile."
+          }
+          onRetry={() => void profile.refetch()}
+        />
+      ) : (
+        <div className="space-y-6">
+          <ProfileHero data={data} loading={profile.isLoading} />
+
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+            {/* -------------------------------------------------- tab rail */}
+            <nav
+              aria-label="Profile sections"
+              className="scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 lg:sticky lg:top-4 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
+            >
+              {TABS.map((t) => {
+                const active = tab === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => changeTab(t.value)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "relative flex shrink-0 items-center gap-3 rounded-2xl p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:w-full lg:p-3.5",
+                      active ? "text-white" : "text-muted-foreground hover:bg-white hover:text-foreground",
+                    )}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="profile-tab"
+                        className="absolute inset-0 rounded-2xl bg-brand-gradient shadow-glow"
+                        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                      />
+                    )}
+                    <span
+                      className={cn(
+                        "relative grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors",
+                        active ? "bg-white/20 text-white" : "bg-white text-primary shadow-soft ring-1 ring-border",
+                      )}
+                    >
+                      <t.icon size={18} />
+                    </span>
+                    <span className="relative min-w-0 pr-1">
+                      <span className="block whitespace-nowrap text-sm font-semibold">{t.label}</span>
+                      <span
+                        className={cn(
+                          "hidden text-xs lg:block",
+                          active ? "text-white/80" : "text-muted-foreground",
+                        )}
+                      >
+                        {t.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* ------------------------------------------------- tab panels */}
+            <div className="min-w-0">
+              {profile.isLoading || !data ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-56" />
+                  <Skeleton className="h-40" />
+                </div>
+              ) : (
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={tab}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.3, ease }}
+                  >
+                    {tab === "personal" && <PersonalTab data={data} />}
+                    {tab === "security" && <SecurityTab email={data.user.email} />}
+                    {tab === "billing" && <BillingTab data={data} />}
+                    {tab === "account" && <AccountTab data={data} />}
+                  </motion.div>
+                </AnimatePresence>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ================================================================== hero */
+
+function ProfileHero({ data, loading }: { data?: ProfileData; loading: boolean }) {
+  const displayName = data?.user.name || data?.user.email?.split("@")[0] || "";
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease }}>
+      <Card className="relative overflow-hidden p-0">
+        <div aria-hidden className="h-28 bg-brand-gradient sm:h-32">
+          <div className="bg-grid h-full w-full opacity-20" />
+        </div>
+        <div aria-hidden className="absolute right-10 top-6 h-24 w-24 animate-float rounded-full bg-white/15 blur-2xl" />
+
+        <div className="relative flex flex-col gap-4 px-5 pb-5 sm:flex-row sm:items-end sm:px-7 sm:pb-6">
+          <div className="-mt-12 shrink-0 sm:-mt-14">
+            {loading ? (
+              <Skeleton className="h-24 w-24 rounded-3xl border-4 border-white" />
+            ) : data?.user.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={data.user.avatarUrl}
+                alt=""
+                className="h-24 w-24 rounded-3xl border-4 border-white object-cover shadow-lift"
+              />
+            ) : (
+              <span className="grid h-24 w-24 place-items-center rounded-3xl border-4 border-white bg-gradient-to-br from-brand-600 via-brand-magenta to-brand-pink font-display text-3xl font-bold text-white shadow-lift">
+                {initials(displayName, "U")}
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-1">
+            {loading ? (
+              <>
+                <Skeleton className="h-7 w-48" />
+                <Skeleton className="h-4 w-64" />
+              </>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate font-display text-2xl font-bold tracking-tight">{displayName}</h2>
+                  {data?.account.role && (
+                    <Badge tone="brand" className="capitalize">
+                      {data.account.role}
+                    </Badge>
+                  )}
+                  {data?.account.isDemo && <Badge tone="warning">Demo</Badge>}
+                </div>
+                <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Mail size={14} /> <span className="truncate">{data?.user.email}</span>
+                  </span>
+                  {data?.company.companyName && (
+                    <span className="flex items-center gap-1.5">
+                      <Building2 size={14} /> {data.company.companyName}
+                    </span>
+                  )}
+                </p>
+              </>
+            )}
+          </div>
+
+          {!loading && data && (
+            <div className="flex gap-3 sm:text-right">
+              <div className="rounded-2xl border bg-brand-50/50 px-4 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Wallet</p>
+                <p className="font-display text-lg font-bold text-primary">
+                  <AnimatedNumber
+                    value={data.balance.currentBalance}
+                    format={(n) => formatCurrency(n, data.balance.currency)}
+                  />
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ============================================================== personal */
+
+function PersonalTab({ data }: { data: ProfileData }) {
+  const queryClient = useQueryClient();
+  const canEditCompany = data.account.role === "owner" || data.account.role === "admin";
+
+  const initial = useMemo(
+    () => ({
+      name: data.user.name ?? "",
+      mobile: data.user.mobile ?? "",
+      country: data.user.country ?? "",
+      companyName: data.company.companyName ?? "",
+    }),
+    [data],
+  );
+  const [form, setForm] = useState(initial);
+  useEffect(() => setForm(initial), [initial]);
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const countryInvalid = form.country.length > 0 && !/^[A-Z]{2}$/.test(form.country);
+
+  const update = useMutation({
     mutationFn: () =>
       api.patch("/settings/profile", {
-        name: name.trim(),
-        phone: mobile.trim(),
-        country: country.trim().length === 2 ? country.trim().toUpperCase() : undefined,
-        companyName: companyName.trim() || undefined,
+        ...(form.name.trim() && { name: form.name.trim() }),
+        phone: form.mobile.trim(),
+        country: form.country.trim().length === 2 ? form.country.trim().toUpperCase() : undefined,
+        companyName: canEditCompany ? form.companyName.trim() || undefined : undefined,
       }),
     onSuccess: () => {
       toast.success("Profile updated successfully");
-      setEditModalOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["settings", "profile"] });
     },
     onError: (error) =>
       toast.error(error instanceof ApiClientError ? error.message : "Failed to update profile"),
   });
 
-  const openEditModal = () => {
-    if (profile.data) {
-      setName(profile.data.user.name || "");
-      setMobile(profile.data.user.mobile || "");
-      setCity(profile.data.user.city || "");
-      setCompanyName(profile.data.company.companyName || "");
-      setCountry(profile.data.user.country || "IN");
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((current) => ({ ...current, [key]: e.target.value }));
+
+  return (
+    <form
+      id={FORM_ID}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (countryInvalid) return;
+        update.mutate();
+      }}
+      className="space-y-5"
+    >
+      <SettingsSection icon={User} title="Personal information" description="How you appear to your team.">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field label="Full name" required>
+            {({ id }) => (
+              <Input
+                id={id}
+                required
+                maxLength={120}
+                autoComplete="name"
+                value={form.name}
+                onChange={set("name")}
+                placeholder="Your full name"
+              />
+            )}
+          </Field>
+          <Field label="Email" hint="Your sign-in email can't be changed here.">
+            {({ id }) => <Input id={id} value={data.user.email} disabled readOnly />}
+          </Field>
+          <Field label="Mobile number">
+            {({ id }) => (
+              <div className="relative">
+                <Phone
+                  size={15}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id={id}
+                  type="tel"
+                  maxLength={20}
+                  autoComplete="tel"
+                  value={form.mobile}
+                  onChange={set("mobile")}
+                  placeholder="+91 98765 43210"
+                  className="pl-9"
+                />
+              </div>
+            )}
+          </Field>
+          <Field
+            label="Country"
+            hint="Two-letter ISO code, e.g. IN, US, AE."
+            error={countryInvalid ? "Use a two-letter code like IN" : undefined}
+          >
+            {({ id }) => (
+              <div className="relative">
+                <Globe
+                  size={15}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id={id}
+                  maxLength={2}
+                  autoComplete="country"
+                  value={form.country}
+                  aria-invalid={countryInvalid || undefined}
+                  onChange={(e) =>
+                    setForm((c) => ({ ...c, country: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") }))
+                  }
+                  placeholder="IN"
+                  className="pl-9 uppercase"
+                />
+              </div>
+            )}
+          </Field>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon={Building2}
+        title="Company"
+        description="Shared by everyone in your workspace."
+        delay={0.06}
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field
+            label="Company name"
+            hint={canEditCompany ? undefined : "Only owners and admins can rename the workspace."}
+          >
+            {({ id }) => (
+              <Input
+                id={id}
+                maxLength={150}
+                value={form.companyName}
+                onChange={set("companyName")}
+                disabled={!canEditCompany}
+                placeholder="Your company"
+              />
+            )}
+          </Field>
+          <Field label="Workspace domain">
+            {({ id }) => <Input id={id} value={data.company.domain ?? "Not set"} disabled readOnly />}
+          </Field>
+        </div>
+      </SettingsSection>
+
+      {!dirty && (
+        <div className="flex justify-end">
+          <Button type="submit" loading={update.isPending}>
+            Save changes
+          </Button>
+        </div>
+      )}
+      <StickySaveBar
+        visible={dirty}
+        saving={update.isPending}
+        formId={FORM_ID}
+        onDiscard={() => setForm(initial)}
+      />
+    </form>
+  );
+}
+
+/* ============================================================== security */
+
+function passwordStrength(pw: string) {
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  const levels = [
+    { label: "Too weak", color: "bg-rose-500" },
+    { label: "Weak", color: "bg-rose-400" },
+    { label: "Fair", color: "bg-amber-500" },
+    { label: "Good", color: "bg-brand-500" },
+    { label: "Strong", color: "bg-brand-600" },
+    { label: "Excellent", color: "bg-brand-700" },
+  ];
+  return { score, ...levels[score]! };
+}
+
+function SecurityTab({ email }: { email: string }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const mismatch = confirm.length > 0 && next !== confirm;
+  const sameAsCurrent = next.length > 0 && next === current;
+  const strength = passwordStrength(next);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mismatch || sameAsCurrent || next.length < 8) return;
+
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      // Re-authenticate first so a borrowed, unlocked session can't change it.
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password: current });
+      if (authError) throw new Error("Your current password is incorrect");
+
+      const { error } = await supabase.auth.updateUser({ password: next });
+      if (error) throw error;
+
+      toast.success("Password updated");
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update your password");
+    } finally {
+      setSaving(false);
     }
-    setEditModalOpen(true);
   };
 
-  const data = profile.data;
-  const user = data?.user;
-  const company = data?.company;
-  const balance = data?.balance;
-  const pricing = data?.pricing;
-  const accountInfo = data?.account;
-
-  const displayName = user?.name || "Ayush";
-
-  const formatDate = (isoString?: string) => {
-    if (!isoString) return "August 5, 2026";
+  const signOutOthers = async () => {
+    setSigningOut(true);
     try {
-      return new Date(isoString).toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      });
-    } catch {
-      return "August 5, 2026";
+      const { error } = await createClient().auth.signOut({ scope: "others" });
+      if (error) throw error;
+      toast.success("Signed out of all other devices");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not sign out other sessions");
+    } finally {
+      setSigningOut(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-        {/* Profile Header Banner */}
-        <div className="flex items-center gap-5">
-          <div className="relative">
-            <div className="grid h-20 w-20 place-items-center rounded-full bg-[#00C268] text-3xl font-bold text-white shadow-sm">
-              {initials(displayName, "A")}
-            </div>
-            <button
-              type="button"
-              onClick={() => toast.info("Profile photo upload coming soon")}
-              aria-label="Change photo"
-              className="absolute bottom-0 right-0 grid h-7 w-7 place-items-center rounded-full border-2 border-background bg-white text-muted-foreground shadow-sm hover:text-foreground hover:scale-105 transition-transform"
-            >
-              <Camera size={14} />
-            </button>
-          </div>
+    <div className="space-y-5">
+      <SettingsSection icon={KeyRound} title="Change password" description="Use at least 8 characters. Longer is stronger.">
+        <form onSubmit={onSubmit} className="max-w-xl space-y-4">
+          {/* Hidden username helps password managers pair the new password with this account. */}
+          <input type="text" name="username" autoComplete="username" value={email} readOnly hidden />
 
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">{displayName}</h1>
-            <p className="text-sm text-muted-foreground">{user?.email || "ayush.goel1910@gmail.com"}</p>
-          </div>
-        </div>
+          <Field label="Current password" required>
+            {({ id }) => (
+              <PasswordInput
+                id={id}
+                required
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+              />
+            )}
+          </Field>
 
-        {/* Main Grid: Left Tabs + Right Content */}
-        <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
-          {/* Left Sub-Navigation Menu */}
-          <div className="space-y-2">
-            {/* Tab 1: Personal Information */}
-            <button
-              type="button"
-              onClick={() => setActiveTab("personal")}
-              className={`flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-all ${
-                activeTab === "personal"
-                  ? "bg-[#00C268] text-white shadow-md"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              }`}
-            >
-              <span
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                  activeTab === "personal"
-                    ? "bg-white/20 text-white"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <User size={18} />
-              </span>
-              <div className="min-w-0">
-                <p className="font-bold text-sm">Personal Information</p>
-                <p
-                  className={`text-xs ${
-                    activeTab === "personal" ? "text-white/80" : "text-muted-foreground"
-                  }`}
-                >
-                  Information about yourself.
-                </p>
-              </div>
-            </button>
-
-            {/* Tab 2: Billing & Balance */}
-            <button
-              type="button"
-              onClick={() => setActiveTab("billing")}
-              className={`flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-all ${
-                activeTab === "billing"
-                  ? "bg-[#00C268] text-white shadow-md"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              }`}
-            >
-              <span
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                  activeTab === "billing"
-                    ? "bg-white/20 text-white"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <CreditCard size={18} />
-              </span>
-              <div className="min-w-0">
-                <p className="font-bold text-sm">Billing & Balance</p>
-                <p
-                  className={`text-xs ${
-                    activeTab === "billing" ? "text-white/80" : "text-muted-foreground"
-                  }`}
-                >
-                  Account balance and pricing.
-                </p>
-              </div>
-            </button>
-
-            {/* Tab 3: Account Details */}
-            <button
-              type="button"
-              onClick={() => setActiveTab("account")}
-              className={`flex w-full items-center gap-3 rounded-2xl p-4 text-left transition-all ${
-                activeTab === "account"
-                  ? "bg-[#00C268] text-white shadow-md"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              }`}
-            >
-              <span
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                  activeTab === "account"
-                    ? "bg-white/20 text-white"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <Shield size={18} />
-              </span>
-              <div className="min-w-0">
-                <p className="font-bold text-sm">Account Details</p>
-                <p
-                  className={`text-xs ${
-                    activeTab === "account" ? "text-white/80" : "text-muted-foreground"
-                  }`}
-                >
-                  System information and dates.
-                </p>
-              </div>
-            </button>
-          </div>
-
-          {/* Right Content Area */}
-          <div className="space-y-6">
-            {profile.isLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-44 rounded-2xl" />
-                <Skeleton className="h-44 rounded-2xl" />
-              </div>
-            ) : (
-              <>
-                {/* TAB 1: Personal Information & 2FA Security on profile load */}
-                {activeTab === "personal" && (
-                  <div className="space-y-6">
-                    {/* Top 2FA Master Card */}
-                    <Card className="rounded-2xl border bg-card p-6 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-base font-bold text-foreground">Secure your Account with 2FA</h2>
-                          <p className="mt-0.5 text-xs text-muted-foreground">Don&apos;t wait - secure your account now!</p>
-                        </div>
-                        <Switch
-                          checked={twoFactorMaster}
-                          onCheckedChange={(val) => {
-                            setTwoFactorMaster(val);
-                            toast.success(val ? "Two-factor authentication enabled" : "Two-factor authentication disabled");
-                          }}
-                          aria-label="Secure your account with 2FA"
+          <Field
+            label="New password"
+            required
+            error={sameAsCurrent ? "Choose a password different from your current one" : undefined}
+          >
+            {({ id }) => (
+              <div className="space-y-2">
+                <PasswordInput
+                  id={id}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+                {next && (
+                  <div className="space-y-1" aria-live="polite">
+                    <div className="flex gap-1">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <motion.span
+                          key={i}
+                          className={cn("h-1.5 flex-1 rounded-full", i < strength.score ? strength.color : "bg-muted")}
+                          initial={false}
+                          animate={{ opacity: i < strength.score ? 1 : 0.6 }}
                         />
-                      </div>
-                    </Card>
-
-                    {/* 2FA Sub-cards Grid */}
-                    <div className="grid gap-6 md:grid-cols-2">
-                      {/* Email Authentication Card */}
-                      <Card className="flex flex-col justify-between rounded-2xl border bg-card p-6 shadow-sm">
-                        <div className="space-y-3">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h3 className="font-bold text-foreground text-sm">Email Authentication</h3>
-                              <p className="text-xs text-muted-foreground">(If no other setup is done)</p>
-                            </div>
-                            <Switch
-                              checked={emailAuthEnabled}
-                              onCheckedChange={setEmailAuthEnabled}
-                              aria-label="Toggle email authentication"
-                            />
-                          </div>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            Email Authentication is set by default for your Account. A 6 digit authentication code will be sent to your registered email during your login.
-                          </p>
-                        </div>
-
-                        <div className="mt-5">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setVerificationCodeSent(true);
-                              toast.success(`Verification code sent to ${user?.email || "your registered email"}`);
-                            }}
-                            className="w-full rounded-xl font-medium"
-                          >
-                            {verificationCodeSent ? "Resend Verification Code" : "Send Verification Code"}
-                          </Button>
-                        </div>
-                      </Card>
-
-                      {/* Google Authentication Card */}
-                      <Card className="flex flex-col justify-between rounded-2xl border bg-card p-6 shadow-sm">
-                        <div className="space-y-3">
-                          <h3 className="font-bold text-foreground text-sm">Google Authentication</h3>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            First, download Google Authenticator from the Google Play Store and the iOS App Store.
-                          </p>
-                        </div>
-
-                        <div className="mt-5">
-                          <button
-                            type="button"
-                            onClick={() => setGoogleAuthModal(true)}
-                            className="flex items-center gap-1 text-xs font-bold text-[#00C268] hover:underline"
-                          >
-                            Setup Authentication <ChevronRight size={14} />
-                          </button>
-                        </div>
-                      </Card>
-
-                      {/* Phone Number Authentication Card */}
-                      <Card className="flex flex-col justify-between rounded-2xl border bg-card p-6 shadow-sm md:col-span-2">
-                        <div className="space-y-3">
-                          <div>
-                            <h3 className="font-bold text-foreground text-sm">Phone Number Authentication</h3>
-                            <p className="text-xs text-muted-foreground">(Only for Indian Numbers)</p>
-                          </div>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            Enter a one time code sent via text message on your registered Phone number.
-                          </p>
-                        </div>
-
-                        <div className="mt-5 flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => setPhoneAuthModal(true)}
-                            className="flex items-center gap-1 text-xs font-bold text-[#00C268] hover:underline"
-                          >
-                            Setup Authentication <ChevronRight size={14} />
-                          </button>
-                        </div>
-                      </Card>
+                      ))}
                     </div>
-
-                    {/* Personal Details & Company Information Card */}
-                    <Card className="rounded-2xl border bg-card p-6 shadow-sm space-y-6">
-                      <div className="flex items-center justify-between border-b pb-4">
-                        <h3 className="text-base font-bold text-foreground">Personal Information</h3>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={openEditModal}
-                          className="gap-1.5 rounded-xl text-xs font-semibold"
-                        >
-                          <Edit2 size={13} />
-                          Edit Details
-                        </Button>
-                      </div>
-
-                      {/* Info Cards Grid */}
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        {/* Email Card */}
-                        <div className="flex items-center gap-4 rounded-2xl border p-4 bg-background">
-                          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-500">
-                            <Mail size={20} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-xs text-muted-foreground font-medium">Email</p>
-                            <p className="truncate text-sm font-bold text-foreground mt-0.5">
-                              {user?.email || "ayush.goel1910@gmail.com"}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Mobile Card */}
-                        <div className="flex items-center gap-4 rounded-2xl border p-4 bg-background">
-                          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-500">
-                            <Phone size={20} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-xs text-muted-foreground font-medium">Mobile</p>
-                            <p className="truncate text-sm font-bold text-foreground mt-0.5">
-                              {user?.mobile || "7428720768"}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* City Card */}
-                        <div className="flex items-center gap-4 rounded-2xl border p-4 bg-background sm:col-span-2">
-                          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-purple-50 text-purple-500">
-                            <MapPin size={20} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-xs text-muted-foreground font-medium">City</p>
-                            <p className="truncate text-sm font-bold text-foreground mt-0.5">
-                              {user?.city || "Not specified"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Company Details */}
-                      <div className="space-y-4 pt-2 border-t">
-                        <div className="flex items-center gap-2 text-foreground font-bold text-sm">
-                          <Building2 size={16} className="text-muted-foreground" />
-                          <span>Company Details</span>
-                        </div>
-
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div className="rounded-2xl border p-4 bg-background">
-                            <p className="text-xs text-muted-foreground font-medium">Company Name</p>
-                            <p className="truncate text-sm font-bold text-foreground mt-1">
-                              {company?.companyName || "Not specified"}
-                            </p>
-                          </div>
-
-                          <div className="rounded-2xl border p-4 bg-background">
-                            <p className="text-xs text-muted-foreground font-medium">Domain</p>
-                            <p className="truncate text-sm font-bold text-foreground mt-1">
-                              {company?.domain || "Not specified"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </Card>
+                    <p className="text-xs text-muted-foreground">
+                      Strength: <span className="font-semibold text-foreground">{strength.label}</span>
+                    </p>
                   </div>
                 )}
-
-                {/* TAB 2: Billing & Balance */}
-                {activeTab === "billing" && (
-                  <Card className="rounded-2xl border bg-card p-6 shadow-sm space-y-6">
-                    {/* Section Title */}
-                    <div className="flex items-center gap-2 text-foreground font-bold text-base border-b pb-4">
-                      <CreditCard size={18} className="text-[#00C268]" />
-                      <span>Account balance and pricing</span>
-                    </div>
-
-                    {/* Top Balance Banner */}
-                    <div className="rounded-2xl border border-emerald-100 bg-[#F0FDF4] p-8 text-center shadow-xs">
-                      <p className="text-xs font-semibold text-muted-foreground">Current Balance</p>
-                      <p className="mt-2 text-4xl font-extrabold text-[#00C268]">
-                        {balance
-                          ? formatCurrency(balance.currentBalance, balance.currency)
-                          : "₹1,003.89"}
-                      </p>
-                      <p className="mt-2 text-xs text-muted-foreground font-medium">Balance Enabled</p>
-                    </div>
-
-                    {/* Total Credit & Debit Row */}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="rounded-2xl border border-emerald-100 bg-background p-6 text-center shadow-xs">
-                        <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-600 mb-3">
-                          <Upload size={18} />
-                        </span>
-                        <p className="text-xs font-semibold text-muted-foreground">Total Credit</p>
-                        <p className="mt-1 text-2xl font-bold text-[#00C268]">
-                          {balance
-                            ? formatCurrency(balance.totalCredit, balance.currency)
-                            : "₹1,010.00"}
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-rose-100 bg-background p-6 text-center shadow-xs">
-                        <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-rose-50 text-rose-600 mb-3">
-                          <ArrowDown size={18} />
-                        </span>
-                        <p className="text-xs font-semibold text-muted-foreground">Total Debit</p>
-                        <p className="mt-1 text-2xl font-bold text-[#E11D48]">
-                          {balance
-                            ? formatCurrency(balance.totalDebit, balance.currency)
-                            : "₹6.11"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Message Pricing Section */}
-                    <div className="space-y-3 pt-2 border-t">
-                      <div className="flex items-center gap-2 text-foreground font-bold text-sm">
-                        <MessageSquare size={16} className="text-muted-foreground" />
-                        <span>Message Pricing</span>
-                      </div>
-
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <div className="rounded-2xl border p-4 bg-background">
-                          <p className="text-xs text-muted-foreground font-medium">Marketing Messages</p>
-                          <p className="mt-1 text-lg font-bold text-foreground">
-                            {pricing?.marketing || "₹0.95"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl border p-4 bg-background">
-                          <p className="text-xs text-muted-foreground font-medium">Utility Messages</p>
-                          <p className="mt-1 text-lg font-bold text-foreground">
-                            {pricing?.utility || "₹0.17"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl border p-4 bg-background">
-                          <p className="text-xs text-muted-foreground font-medium">Auth Messages</p>
-                          <p className="mt-1 text-lg font-bold text-foreground">
-                            {pricing?.auth || "₹0.17"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                )}
-
-                {/* TAB 3: Account Details */}
-                {activeTab === "account" && (
-                  <Card className="rounded-2xl border bg-card p-6 shadow-sm space-y-6">
-                    <div className="border-b pb-4">
-                      <div className="flex items-center gap-2 text-foreground font-bold text-base">
-                        <Shield size={18} className="text-[#00C268]" />
-                        <span>Account Details</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">System information and dates</p>
-                    </div>
-
-                    {/* Metadata Grid */}
-                    <div className="grid gap-4 sm:grid-cols-2 text-xs">
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-muted-foreground font-semibold">Role ID</p>
-                          <p className="mt-0.5 text-sm font-bold text-foreground">
-                            {accountInfo?.roleId ?? 3}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-muted-foreground font-semibold">Agent ID</p>
-                          <p className="mt-0.5 text-sm font-bold text-foreground">
-                            {accountInfo?.agentId || "Not assigned"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-muted-foreground font-semibold">Country ID</p>
-                          <p className="mt-0.5 text-sm font-bold text-foreground">
-                            {accountInfo?.countryId ?? 98}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* System Dates */}
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-3.5 rounded-xl bg-muted/40 p-4 text-xs">
-                        <span className="text-muted-foreground">
-                          <Calendar size={18} />
-                        </span>
-                        <div>
-                          <p className="text-muted-foreground font-medium">Account Created</p>
-                          <p className="text-sm font-bold text-foreground mt-0.5">
-                            {formatDate(accountInfo?.createdAt)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3.5 rounded-xl bg-muted/40 p-4 text-xs">
-                        <span className="text-muted-foreground">
-                          <Clock size={18} />
-                        </span>
-                        <div>
-                          <p className="text-muted-foreground font-medium">Last Updated</p>
-                          <p className="text-sm font-bold text-foreground mt-0.5">
-                            {formatDate(accountInfo?.updatedAt)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Demo Warning Banner */}
-                    {accountInfo?.isDemo !== false && (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 text-xs text-amber-900 space-y-1.5">
-                        <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
-                          <Shield size={16} className="text-amber-600" />
-                          <span>Demo Account</span>
-                        </div>
-                        <p className="text-amber-800">
-                          This is a demo account with limited functionality.
-                        </p>
-                        <p className="font-semibold text-amber-950 pt-1">
-                          Demo expires on: {formatDate(accountInfo?.demoExpiresAt)}
-                        </p>
-                      </div>
-                    )}
-                  </Card>
-                )}
-              </>
+              </div>
             )}
-          </div>
-        </div>
+          </Field>
 
-        {/* Google Authenticator Modal */}
-        {googleAuthModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
-            <Card className="w-full max-w-md p-6 shadow-2xl space-y-4 rounded-2xl animate-in zoom-in-95">
-              <h3 className="text-lg font-bold">Setup Google Authenticator</h3>
-              <p className="text-xs text-muted-foreground">
-                Scan this QR code with Google Authenticator or enter the manual key below.
-              </p>
-              <div className="grid h-44 w-full place-items-center rounded-xl bg-muted/40 border border-dashed">
-                <p className="text-xs font-mono text-muted-foreground">[ Authenticator QR Code ]</p>
-              </div>
-              <Field label="6-Digit Verification Code">
-                {({ id }) => <Input id={id} placeholder="123456" maxLength={6} />}
-              </Field>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={() => setGoogleAuthModal(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => {
-                    toast.success("Google Authenticator connected successfully");
-                    setGoogleAuthModal(false);
-                  }}
-                >
-                  Verify & Save
-                </Button>
-              </div>
-            </Card>
-          </div>
-        )}
+          <Field label="Confirm new password" required error={mismatch ? "Passwords do not match" : undefined}>
+            {({ id }) => (
+              <PasswordInput
+                id={id}
+                required
+                autoComplete="new-password"
+                value={confirm}
+                aria-invalid={mismatch || undefined}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            )}
+          </Field>
 
-        {/* Phone Number Authenticator Modal */}
-        {phoneAuthModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
-            <Card className="w-full max-w-md p-6 shadow-2xl space-y-4 rounded-2xl animate-in zoom-in-95">
-              <h3 className="text-lg font-bold">Setup Phone Number Authentication</h3>
-              <p className="text-xs text-muted-foreground">
-                Enter your Indian mobile number (+91) to receive login OTPs.
-              </p>
-              <Field label="Phone Number">
-                {({ id }) => <Input id={id} defaultValue="+919266806659" placeholder="+91..." />}
-              </Field>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={() => setPhoneAuthModal(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => {
-                    toast.success("OTP sent to your phone");
-                    setPhoneAuthModal(false);
-                  }}
-                >
-                  Send OTP
-                </Button>
-              </div>
-            </Card>
-          </div>
-        )}
+          <Button
+            type="submit"
+            loading={saving}
+            disabled={mismatch || sameAsCurrent || next.length < 8 || !current}
+          >
+            Update password
+          </Button>
+        </form>
+      </SettingsSection>
 
-        {/* Edit Profile Modal */}
-        {editModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
-            <Card className="w-full max-w-lg p-6 shadow-2xl space-y-4 rounded-2xl animate-in zoom-in-95">
-              <div className="flex items-center justify-between border-b pb-3">
-                <h3 className="text-lg font-bold">Edit Profile Details</h3>
-                <button
-                  type="button"
-                  onClick={() => setEditModalOpen(false)}
-                  className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <SettingsSection icon={LogOut} title="Active sessions" description="Signed in somewhere you don't recognise?" delay={0.06}>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Sign out everywhere except this browser. You&apos;ll stay signed in here.
+          </p>
+          <Button variant="outline" loading={signingOut} onClick={signOutOthers}>
+            {!signingOut && <LogOut size={16} />}
+            Sign out other devices
+          </Button>
+        </SettingsSection>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  updateProfile.mutate();
-                }}
-                className="space-y-4 text-xs"
-              >
-                <Field label="Full Name">
-                  {({ id }) => (
-                    <Input
-                      id={id}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Ayush"
-                    />
-                  )}
-                </Field>
-
-                <Field label="Mobile Number">
-                  {({ id }) => (
-                    <Input
-                      id={id}
-                      value={mobile}
-                      onChange={(e) => setMobile(e.target.value)}
-                      placeholder="7428720768"
-                    />
-                  )}
-                </Field>
-
-                <Field label="Company Name">
-                  {({ id }) => (
-                    <Input
-                      id={id}
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      placeholder="WA Automation"
-                    />
-                  )}
-                </Field>
-
-                <Field label="Country (2-Letter ISO Code)">
-                  {({ id }) => (
-                    <Input
-                      id={id}
-                      maxLength={2}
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value.toUpperCase())}
-                      placeholder="IN"
-                    />
-                  )}
-                </Field>
-
-                <div className="flex justify-end gap-2 pt-3 border-t">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setEditModalOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" loading={updateProfile.isPending}>
-                    Save Changes
-                  </Button>
-                </div>
-              </form>
-            </Card>
-          </div>
-        )}
+        <SettingsSection
+          icon={ShieldAlert}
+          title="Two-factor authentication"
+          description="An extra code when you sign in."
+          delay={0.1}
+          actions={<Badge tone="neutral">Not enabled</Badge>}
+        >
+          <p className="mb-4 text-sm text-muted-foreground">
+            Two-factor sign-in isn&apos;t available for self-service yet. Raise a ticket and our team will help
+            you secure the account.
+          </p>
+          <Link href="/support/tickets" className={buttonVariants({ variant: "secondary" })}>
+            <LifeBuoy size={16} />
+            Contact support
+          </Link>
+        </SettingsSection>
       </div>
+    </div>
+  );
+}
+
+/* =============================================================== billing */
+
+function BillingTab({ data }: { data: ProfileData }) {
+  const { balance, pricing } = data;
+  const fmt = (n: number) => formatCurrency(n, balance.currency);
+
+  const prices = [
+    { label: "Marketing", value: pricing.marketing, icon: MessageSquare },
+    { label: "Utility", value: pricing.utility, icon: Clock },
+    { label: "Authentication", value: pricing.auth, icon: KeyRound },
+    { label: "Service", value: pricing.service, icon: LifeBuoy },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease }}>
+        <Card className="relative overflow-hidden border-0 bg-brand-gradient p-6 text-white shadow-glow sm:p-8">
+          <div aria-hidden className="bg-grid absolute inset-0 opacity-15" />
+          <div aria-hidden className="absolute -right-10 -top-10 h-44 w-44 rounded-full bg-white/15 blur-2xl" />
+          <div className="relative flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold text-white/80">
+                <Wallet size={16} /> Current balance
+              </p>
+              <p className="mt-2 font-display text-4xl font-bold tracking-tight sm:text-5xl">
+                <AnimatedNumber value={balance.currentBalance} format={fmt} />
+              </p>
+              <p className="mt-1 text-sm text-white/75">Used for WhatsApp conversation charges.</p>
+            </div>
+            <Link
+              href="/analytics/wallet"
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-primary shadow-soft transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              Wallet history <ArrowUpRight size={16} />
+            </Link>
+          </div>
+        </Card>
+      </motion.div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <motion.div whileHover={{ y: -3 }}>
+          <Card className="flex items-center gap-4 p-5">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
+              <ArrowDownLeft size={20} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total credited</p>
+              <p className="font-display text-2xl font-bold">
+                <AnimatedNumber value={balance.totalCredit} format={fmt} />
+              </p>
+            </div>
+          </Card>
+        </motion.div>
+        <motion.div whileHover={{ y: -3 }}>
+          <Card className="flex items-center gap-4 p-5">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
+              <ArrowUpRight size={20} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total spent</p>
+              <p className="font-display text-2xl font-bold">
+                <AnimatedNumber value={balance.totalDebit} format={fmt} />
+              </p>
+            </div>
+          </Card>
+        </motion.div>
+      </div>
+
+      <SettingsSection
+        icon={MessageSquare}
+        title="Message pricing"
+        description="Charged per delivered conversation, by category."
+        actions={
+          <Link href="/analytics/credits" className="text-sm font-semibold text-primary hover:underline">
+            Credit history →
+          </Link>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {prices.map((p, i) => (
+            <motion.div
+              key={p.label}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease, delay: 0.05 * i }}
+              className="rounded-2xl border bg-brand-50/30 p-4"
+            >
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                <p.icon size={13} className="text-primary" />
+                {p.label}
+              </p>
+              <p className="mt-1 font-display text-xl font-bold">{p.value}</p>
+              <p className="text-[11px] text-muted-foreground">per message</p>
+            </motion.div>
+          ))}
+        </div>
+      </SettingsSection>
+    </div>
+  );
+}
+
+/* =============================================================== account */
+
+function AccountTab({ data }: { data: ProfileData }) {
+  const { account, user, company } = data;
+
+  return (
+    <div className="space-y-5">
+      <SettingsSection icon={Fingerprint} title="Account details" description="System information about your login.">
+        <dl className="divide-y divide-border/70">
+          <InfoRow label="Role" value={<span className="capitalize">{account.role}</span>} />
+          <InfoRow label="User ID" value={user.id} mono copy={user.id} />
+          <InfoRow label="Organization ID" value={company.organizationId} mono copy={company.organizationId} />
+          <InfoRow label="Agent ID" value={account.agentId ?? "Not assigned"} />
+        </dl>
+      </SettingsSection>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Card className="flex items-center gap-4 p-5">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-primary ring-1 ring-brand-100">
+            <CalendarDays size={18} />
+          </span>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground">Member since</p>
+            <p className="font-semibold">{formatDate(account.createdAt)}</p>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-4 p-5">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-50 text-primary ring-1 ring-brand-100">
+            <Clock size={18} />
+          </span>
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground">Last updated</p>
+            <p className="font-semibold">{formatDate(account.updatedAt)}</p>
+          </div>
+        </Card>
+      </div>
+
+      {account.isDemo && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.35, ease }}
+          className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-5 sm:flex-row sm:items-center"
+        >
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-amber-600 shadow-soft">
+            <ShieldAlert size={20} />
+          </span>
+          <div className="flex-1 text-sm text-amber-900">
+            <p className="font-semibold text-amber-950">Demo account</p>
+            <p>
+              Some features are limited.
+              {account.demoExpiresAt && <> Your demo ends on {formatDate(account.demoExpiresAt)}.</>}
+            </p>
+          </div>
+          <Link href="/support/tickets" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Talk to us
+          </Link>
+        </motion.div>
+      )}
+    </div>
   );
 }

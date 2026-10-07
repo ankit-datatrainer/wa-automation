@@ -1,27 +1,40 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { format } from "date-fns";
 import {
+  ArrowUpRight,
+  CalendarDays,
+  Check,
   ChevronDown,
+  Copy,
   Hash,
+  Mail,
   Pencil,
-  Phone,
   Plus,
   Tag,
   Ticket,
-  User,
+  UserCheck,
   Users,
+  X,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { Badge, statusTone } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/states";
+import { ease } from "@/components/motion";
 import { api } from "@/lib/api-client";
 import { cn, initials } from "@/lib/utils";
+import { ContactAvatar } from "./inbox-ui";
 import {
   AssignAgentModal,
   CreateTicketModal,
   EditAttributesModal,
   ManageGroupsModal,
   ManageTagsModal,
+  type AgentMember,
 } from "./inbox-modals";
 
 interface ContactDetail {
@@ -32,9 +45,19 @@ interface ContactDetail {
   attributes: Record<string, unknown>;
   opt_in_status: string;
   created_at: string;
-  contact_tags?: { tags: { id: string; name: string; color: string } }[];
-  contact_groups?: { groups: { id: string; name: string } }[];
+  contact_tags?: { tags: { id: string; name: string; color: string } | null }[];
+  contact_groups?: { groups: { id: string; name: string } | null }[];
 }
+
+interface TicketRow {
+  id: string;
+  subject: string;
+  status: string;
+  priority: string;
+  created_at?: string;
+}
+
+type SectionKey = "attributes" | "tags" | "groups" | "tickets";
 
 export function ContactDetailsPanel({
   conversationId,
@@ -42,33 +65,33 @@ export function ContactDetailsPanel({
   contactName,
   contactWaId,
   assignedTo,
-  assigneeName,
+  sessionOpen,
+  onClose,
 }: {
   conversationId: string;
   contactId: string;
   contactName: string | null;
   contactWaId: string;
   assignedTo: string | null;
-  assigneeName: string | null;
+  sessionOpen?: boolean;
+  onClose?: () => void;
 }) {
-  // Collapsible sections state
-  const [openSections, setOpenSections] = useState({
+  const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
     attributes: true,
     tags: true,
     groups: true,
-    tickets: true,
+    tickets: false,
   });
+  const [copied, setCopied] = useState(false);
 
-  // Modal open states
   const [assignOpen, setAssignOpen] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
 
-  const toggleSection = (key: keyof typeof openSections) => {
+  const toggleSection = (key: SectionKey) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
 
   const contactQuery = useQuery({
     queryKey: ["contact", contactId],
@@ -78,309 +101,279 @@ export function ContactDetailsPanel({
 
   const ticketsQuery = useQuery({
     queryKey: ["support-tickets"],
-    queryFn: () => api.get<{ data: { id: string; subject: string; status: string; priority: string }[] }>("/support/tickets"),
+    queryFn: () => api.get<{ data: TicketRow[] }>("/support/tickets"),
+  });
+
+  // Same key as the assign modal, so the roster is fetched once and shared.
+  const agentsQuery = useQuery({
+    queryKey: ["admin", "agents"],
+    queryFn: () => api.get<{ data: AgentMember[] }>("/admin/agents"),
+    enabled: !!assignedTo,
   });
 
   const contactData = contactQuery.data;
   const attributes = contactData?.attributes ?? {};
   const attributeEntries = Object.entries(attributes);
-
-  const tags = contactData?.contact_tags?.map((t) => t.tags).filter(Boolean) ?? [];
-  const groups = contactData?.contact_groups?.map((g) => g.groups).filter(Boolean) ?? [];
+  const tags =
+    contactData?.contact_tags?.map((t) => t.tags).filter((t): t is NonNullable<typeof t> => !!t) ?? [];
+  const groups =
+    contactData?.contact_groups?.map((g) => g.groups).filter((g): g is NonNullable<typeof g> => !!g) ?? [];
   const tickets = ticketsQuery.data?.data ?? [];
 
+  const assignee = assignedTo
+    ? agentsQuery.data?.data.find((a) => a.user?.id === assignedTo)
+    : undefined;
+  const assigneeLabel = assignedTo
+    ? (assignee?.user?.name ?? assignee?.user?.email ?? (agentsQuery.isLoading ? "Loading…" : "Team member"))
+    : "Unassigned";
+
+  const displayName = contactData?.name ?? contactName ?? `+${contactWaId}`;
+
+  const copyNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(`+${contactWaId}`);
+      setCopied(true);
+      toast.success("Phone number copied");
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  };
+
   return (
-    <div className="flex w-80 shrink-0 flex-col border-l bg-card overflow-y-auto scrollbar-thin divide-y">
-      {/* Contact Profile Header */}
-      <div className="flex flex-col items-center p-6 text-center">
-        <div className="relative mb-3">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-[#00C268] text-2xl font-bold text-white shadow-md">
-            {initials(contactName, contactWaId.slice(-2))}
-          </span>
-          {/* Online green indicator on the rim */}
-          <span
-            title="Online"
-            className="absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-card bg-emerald-500 shadow-sm"
-          />
-        </div>
-
-        <h3 className="text-lg font-bold text-foreground">
-          {contactName ?? `+${contactWaId}`}
-        </h3>
-        <div className="mt-1 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-          <Phone size={13} className="text-muted-foreground/80" />
-          <span className="font-mono">{contactWaId}</span>
-        </div>
-      </div>
-
-      {/* Assignment Section */}
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wide">
-            <User size={14} className="text-muted-foreground" />
-            <span>Assignment</span>
+    <div className="flex h-full min-h-0 w-full flex-col bg-white">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {/* Profile header */}
+        <div className="relative">
+          <div aria-hidden className="h-24 bg-brand-gradient">
+            <div className="h-full w-full bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.35),transparent_45%),radial-gradient(circle_at_85%_60%,rgba(252,175,69,0.35),transparent_40%)]" />
           </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-sm font-medium text-muted-foreground">
-            {assigneeName ?? (assignedTo ? "Assigned Agent" : "Not assigned")}
-          </span>
-          <button
-            type="button"
-            onClick={() => setAssignOpen(true)}
-            className="rounded-lg bg-[#00C268] px-3.5 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90 active:scale-95 shadow-sm"
-          >
-            Assign
-          </button>
-        </div>
-      </div>
-
-      {/* # Attributes Section */}
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => toggleSection("attributes")}
-            className="flex flex-1 items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wide hover:text-foreground text-left"
-          >
-            <Hash size={14} />
-            <span>Attributes</span>
-          </button>
-
-          <div className="flex items-center gap-1">
+          {onClose && (
             <button
               type="button"
-              onClick={() => setAttributesOpen(true)}
-              aria-label="Edit attributes"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              onClick={onClose}
+              aria-label="Close contact details"
+              className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-xl bg-white/20 text-white backdrop-blur transition-colors hover:bg-white/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
-              <Pencil size={12} />
+              <X size={16} />
             </button>
+          )}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease }}
+            className="-mt-10 flex flex-col items-center px-5 pb-5 text-center"
+          >
+            <ContactAvatar
+              name={contactData?.name ?? contactName}
+              waId={contactWaId}
+              seed={contactId}
+              size="xl"
+              online={sessionOpen}
+              className="[&>span:first-child]:ring-4"
+            />
+            <h3 className="mt-3 max-w-full truncate text-lg font-semibold tracking-tight">{displayName}</h3>
             <button
               type="button"
-              onClick={() => toggleSection("attributes")}
-              aria-label="Toggle attributes"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted transition-colors"
+              onClick={copyNumber}
+              className="group mt-1 inline-flex items-center gap-1.5 rounded-lg px-2 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-brand-50 hover:text-primary"
+              aria-label={`Copy phone number +${contactWaId}`}
             >
-              <ChevronDown
-                size={14}
-                className={cn(
-                  "transition-transform duration-200",
-                  !openSections.attributes && "-rotate-90",
-                )}
-              />
+              <span className="font-medium tabular-nums">+{contactWaId}</span>
+              {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} className="opacity-60 group-hover:opacity-100" />}
             </button>
-          </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+              {contactQuery.isLoading ? (
+                <Skeleton className="h-5 w-24 rounded-full" />
+              ) : contactData?.opt_in_status ? (
+                <Badge tone={statusTone(contactData.opt_in_status)} className="capitalize">
+                  {contactData.opt_in_status.replace(/_/g, " ")}
+                </Badge>
+              ) : null}
+              <Badge tone={sessionOpen ? "success" : "neutral"}>
+                {sessionOpen ? "Window open" : "Window closed"}
+              </Badge>
+            </div>
+          </motion.div>
         </div>
 
-        {openSections.attributes && (
-          <div className="pt-2">
-            {attributeEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-4 text-center">
-                <Hash size={24} className="text-muted-foreground/30 mb-1" />
-                <p className="text-xs text-muted-foreground">No attributes available</p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {attributeEntries.map(([k, v]) => (
-                  <div
-                    key={k}
-                    className="flex items-center justify-between rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs"
-                  >
-                    <span className="font-semibold text-muted-foreground capitalize">{k}</span>
-                    <span className="font-medium text-foreground truncate max-w-[140px]">
-                      {String(v)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+        {/* Quick facts */}
+        {(contactData?.email || contactData?.created_at) && (
+          <div className="mx-4 mb-4 space-y-2 rounded-2xl border border-border/70 bg-muted/30 p-3 text-xs">
+            {contactData?.email && (
+              <a
+                href={`mailto:${contactData.email}`}
+                className="flex items-center gap-2 text-foreground/80 hover:text-primary"
+              >
+                <Mail size={14} className="shrink-0 text-primary" />
+                <span className="truncate">{contactData.email}</span>
+              </a>
+            )}
+            {contactData?.created_at && (
+              <p className="flex items-center gap-2 text-foreground/80">
+                <CalendarDays size={14} className="shrink-0 text-primary" />
+                Contact since {format(new Date(contactData.created_at), "MMM d, yyyy")}
+              </p>
             )}
           </div>
         )}
-      </div>
 
-      {/* Tags Section */}
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
+        {/* Assignment */}
+        <div className="mx-4 mb-4 flex items-center gap-3 rounded-2xl border border-border/70 bg-white p-3 shadow-soft">
+          {assignedTo ? (
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-bold text-primary ring-1 ring-brand-200">
+              {initials(assignee?.user?.name ?? assignee?.user?.email, "A")}
+            </span>
+          ) : (
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-dashed border-border text-muted-foreground">
+              <UserCheck size={16} />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">Assigned to</p>
+            <p className={cn("truncate text-sm font-semibold", !assignedTo && "text-muted-foreground")}>
+              {assigneeLabel}
+            </p>
+          </div>
           <button
             type="button"
-            onClick={() => toggleSection("tags")}
-            className="flex flex-1 items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wide hover:text-foreground text-left"
+            onClick={() => setAssignOpen(true)}
+            className="shrink-0 rounded-xl bg-brand-gradient px-3 py-1.5 text-xs font-semibold text-white shadow-[0_6px_16px_-8px_rgba(131,58,180,0.8)] transition-all hover:brightness-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
           >
-            <Tag size={14} />
-            <span>Tags</span>
+            {assignedTo ? "Change" : "Assign"}
           </button>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setTagsOpen(true)}
-              aria-label="Add tags"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <Plus size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleSection("tags")}
-              aria-label="Toggle tags"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted transition-colors"
-            >
-              <ChevronDown
-                size={14}
-                className={cn(
-                  "transition-transform duration-200",
-                  !openSections.tags && "-rotate-90",
-                )}
-              />
-            </button>
-          </div>
         </div>
 
-        {openSections.tags && (
-          <div className="pt-2">
+        <div className="divide-y divide-border/70 border-t border-border/70">
+          {/* Attributes */}
+          <PanelSection
+            title="Attributes"
+            icon={Hash}
+            count={attributeEntries.length}
+            open={openSections.attributes}
+            onToggle={() => toggleSection("attributes")}
+            actionLabel="Edit attributes"
+            actionIcon={Pencil}
+            onAction={() => setAttributesOpen(true)}
+          >
+            {contactQuery.isLoading ? (
+              <div className="space-y-1.5">
+                <Skeleton className="h-8 rounded-lg" />
+                <Skeleton className="h-8 rounded-lg" />
+              </div>
+            ) : attributeEntries.length === 0 ? (
+              <EmptyLine text="No custom attributes yet." actionText="Add one" onAction={() => setAttributesOpen(true)} />
+            ) : (
+              <dl className="space-y-1.5">
+                {attributeEntries.map(([k, v]) => (
+                  <div
+                    key={k}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 text-xs"
+                  >
+                    <dt className="shrink-0 font-semibold capitalize text-muted-foreground">{k.replace(/_/g, " ")}</dt>
+                    <dd className="truncate text-right font-medium text-foreground" title={formatValue(v)}>
+                      {formatValue(v)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </PanelSection>
+
+          {/* Tags */}
+          <PanelSection
+            title="Tags"
+            icon={Tag}
+            count={tags.length}
+            open={openSections.tags}
+            onToggle={() => toggleSection("tags")}
+            actionLabel="Manage tags"
+            actionIcon={Plus}
+            onAction={() => setTagsOpen(true)}
+          >
             {tags.length === 0 ? (
-              <p className="py-2 text-center text-xs text-muted-foreground">No tags assigned</p>
+              <EmptyLine text="No tags assigned." actionText="Add tags" onAction={() => setTagsOpen(true)} />
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
                   <span
                     key={tag.id}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold text-white shadow-xs"
-                    style={{ backgroundColor: tag.color }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-white px-2.5 py-1 text-xs font-semibold text-foreground shadow-soft"
                   >
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
                     {tag.name}
                   </span>
                 ))}
               </div>
             )}
-          </div>
-        )}
-      </div>
+          </PanelSection>
 
-      {/* Groups Section */}
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => toggleSection("groups")}
-            className="flex flex-1 items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wide hover:text-foreground text-left"
+          {/* Groups */}
+          <PanelSection
+            title="Groups"
+            icon={Users}
+            count={groups.length}
+            open={openSections.groups}
+            onToggle={() => toggleSection("groups")}
+            actionLabel="Manage groups"
+            actionIcon={Plus}
+            onAction={() => setGroupsOpen(true)}
           >
-            <Users size={14} />
-            <span>Groups</span>
-          </button>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setGroupsOpen(true)}
-              aria-label="Add groups"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <Plus size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleSection("groups")}
-              aria-label="Toggle groups"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted transition-colors"
-            >
-              <ChevronDown
-                size={14}
-                className={cn(
-                  "transition-transform duration-200",
-                  !openSections.groups && "-rotate-90",
-                )}
-              />
-            </button>
-          </div>
-        </div>
-
-        {openSections.groups && (
-          <div className="pt-2">
             {groups.length === 0 ? (
-              <p className="py-2 text-center text-xs text-muted-foreground">No groups assigned</p>
+              <EmptyLine text="Not in any group." actionText="Add to group" onAction={() => setGroupsOpen(true)} />
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {groups.map((group) => (
-                  <Badge key={group.id} tone="info" className="text-xs">
+                  <Badge key={group.id} tone="brand">
                     {group.name}
                   </Badge>
                 ))}
               </div>
             )}
-          </div>
-        )}
-      </div>
+          </PanelSection>
 
-      {/* Ticket History Section */}
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => toggleSection("tickets")}
-            className="flex flex-1 items-center gap-1.5 text-xs font-bold text-muted-foreground uppercase tracking-wide hover:text-foreground text-left"
+          {/* Support tickets (workspace-wide; tickets aren't linked to a contact) */}
+          <PanelSection
+            title="Support tickets"
+            icon={Ticket}
+            count={tickets.length}
+            open={openSections.tickets}
+            onToggle={() => toggleSection("tickets")}
+            actionLabel="Raise a support ticket"
+            actionIcon={Plus}
+            onAction={() => setTicketOpen(true)}
           >
-            <Ticket size={14} />
-            <span>Ticket History</span>
-            <span className="ml-1 rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-bold">
-              {tickets.length}
-            </span>
-          </button>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setTicketOpen(true)}
-              aria-label="Create ticket"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <Plus size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleSection("tickets")}
-              aria-label="Toggle tickets"
-              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted transition-colors"
-            >
-              <ChevronDown
-                size={14}
-                className={cn(
-                  "transition-transform duration-200",
-                  !openSections.tickets && "-rotate-90",
-                )}
-              />
-            </button>
-          </div>
-        </div>
-
-        {openSections.tickets && (
-          <div className="pt-2">
-            {tickets.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-4 text-center">
-                <div className="mx-auto grid h-8 w-8 place-items-center rounded-lg bg-muted text-muted-foreground mb-1.5">
-                  <Ticket size={16} />
-                </div>
-                <p className="text-xs text-muted-foreground">No support ticket history found.</p>
-              </div>
+            {ticketsQuery.isLoading ? (
+              <Skeleton className="h-14 rounded-xl" />
+            ) : tickets.length === 0 ? (
+              <EmptyLine text="No support tickets yet." actionText="Raise one" onAction={() => setTicketOpen(true)} />
             ) : (
               <div className="space-y-2">
-                {tickets.map((t) => (
-                  <div key={t.id} className="rounded-xl border p-2.5 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold truncate max-w-[150px]">{t.subject}</span>
-                      <Badge tone={t.status === "open" ? "warning" : "success"} className="text-[10px]">
-                        {t.status}
+                {tickets.slice(0, 4).map((t) => (
+                  <div key={t.id} className="rounded-xl border border-border/70 p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="line-clamp-2 text-xs font-semibold">{t.subject}</span>
+                      <Badge tone={statusTone(t.status)} className="shrink-0 text-[10px] capitalize">
+                        {t.status.replace(/_/g, " ")}
                       </Badge>
                     </div>
-                    <p className="text-[10px] text-muted-foreground capitalize">Priority: {t.priority}</p>
+                    <p className="mt-1 text-[11px] capitalize text-muted-foreground">
+                      {t.priority} priority
+                      {t.created_at ? ` · ${format(new Date(t.created_at), "MMM d")}` : ""}
+                    </p>
                   </div>
                 ))}
+                <Link
+                  href="/support/tickets"
+                  className="inline-flex items-center gap-1 px-1 text-xs font-semibold text-primary hover:underline"
+                >
+                  View all tickets <ArrowUpRight size={12} />
+                </Link>
               </div>
             )}
-          </div>
-        )}
+          </PanelSection>
+        </div>
       </div>
 
       {/* Modals */}
@@ -390,33 +383,122 @@ export function ContactDetailsPanel({
         isOpen={assignOpen}
         onClose={() => setAssignOpen(false)}
       />
-
       <EditAttributesModal
         contactId={contactId}
         currentAttributes={attributes}
         isOpen={attributesOpen}
         onClose={() => setAttributesOpen(false)}
       />
-
       <ManageTagsModal
         contactId={contactId}
         assignedTagIds={tags.map((t) => t.id)}
         isOpen={tagsOpen}
         onClose={() => setTagsOpen(false)}
       />
-
       <ManageGroupsModal
         contactId={contactId}
         assignedGroupIds={groups.map((g) => g.id)}
         isOpen={groupsOpen}
         onClose={() => setGroupsOpen(false)}
       />
-
-      <CreateTicketModal
-        contactName={contactName}
-        isOpen={ticketOpen}
-        onClose={() => setTicketOpen(false)}
-      />
+      <CreateTicketModal contactName={contactName} isOpen={ticketOpen} onClose={() => setTicketOpen(false)} />
     </div>
   );
+}
+
+function PanelSection({
+  title,
+  icon: Icon,
+  count,
+  open,
+  onToggle,
+  actionLabel,
+  actionIcon: ActionIcon,
+  onAction,
+  children,
+}: {
+  title: string;
+  icon: typeof Hash;
+  count?: number;
+  open: boolean;
+  onToggle: () => void;
+  actionLabel: string;
+  actionIcon: typeof Hash;
+  onAction: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="px-4 py-3">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex flex-1 items-center gap-2 rounded-lg py-1 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <span className="grid h-6 w-6 place-items-center rounded-lg bg-brand-50 text-primary">
+            <Icon size={13} />
+          </span>
+          {title}
+          {typeof count === "number" && count > 0 && (
+            <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-bold tabular-nums text-foreground/70">
+              {count}
+            </span>
+          )}
+          <ChevronDown
+            size={14}
+            className={cn("ml-auto transition-transform duration-300", !open && "-rotate-90")}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={onAction}
+          aria-label={actionLabel}
+          title={actionLabel}
+          className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-brand-50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <ActionIcon size={13} />
+        </button>
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="content"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.28, ease }}
+            className="overflow-hidden"
+          >
+            <div className="pb-1 pt-2.5">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
+  );
+}
+
+function EmptyLine({
+  text,
+  actionText,
+  onAction,
+}: {
+  text: string;
+  actionText: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
+      <span>{text}</span>
+      <button type="button" onClick={onAction} className="shrink-0 font-semibold text-primary hover:underline">
+        {actionText}
+      </button>
+    </div>
+  );
+}
+
+function formatValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }

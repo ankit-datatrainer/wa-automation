@@ -187,25 +187,30 @@ adminRouter.get(
       .in("role", ["agent", "manager"])
       .order("is_online", { ascending: false });
 
-    if (error || !data || data.length === 0) {
-      return res.json(demoData.agents);
+    // Demo rows are only for the placeholder-Supabase demo build; a real
+    // tenant with no agents must see an empty roster, not a fake one.
+    if (error) {
+      if (isDemoMode) return res.json(demoData.agents);
+      throw error;
+    }
+    if (!data || data.length === 0) {
+      return res.json(isDemoMode ? demoData.agents : { data: [] });
     }
 
     const memberIds = (data ?? [])
       .map((m) => toOne<{ id: string }>(m.users)?.id)
       .filter((id): id is string => !!id);
 
-    if (memberIds.length === 0) {
-      return res.json(demoData.agents);
-    }
-
     // Open conversation counts drive assignment balance.
-    const { data: assignments } = await supabaseAdmin
-      .from("conversations")
-      .select("assigned_to")
-      .eq("organization_id", req.auth!.organizationId)
-      .eq("status", "open")
-      .in("assigned_to", memberIds);
+    const { data: assignments } =
+      memberIds.length === 0
+        ? { data: [] as { assigned_to: string | null }[] }
+        : await supabaseAdmin
+            .from("conversations")
+            .select("assigned_to")
+            .eq("organization_id", req.auth!.organizationId)
+            .eq("status", "open")
+            .in("assigned_to", memberIds);
 
     const load = new Map<string, number>();
     for (const row of assignments ?? []) {

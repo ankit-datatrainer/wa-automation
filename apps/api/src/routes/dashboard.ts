@@ -92,24 +92,29 @@ dashboardRouter.get(
         .maybeSingle(),
     ]);
 
+    // Missing values are returned as null so the UI can show an honest empty
+    // state instead of placeholder account details.
     const trialEndsAt = org.data?.trial_ends_at ? new Date(org.data.trial_ends_at) : null;
     const daysRemaining = trialEndsAt
       ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86_400_000))
-      : 20;
+      : null;
 
-    const memberSinceDate = user.data?.created_at ? new Date(user.data.created_at) : new Date("2026-08-05");
-    const formattedMemberSince = memberSinceDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    const dateFormat: Intl.DateTimeFormatOptions = { month: "long", day: "numeric", year: "numeric" };
+    const memberSinceSource = user.data?.created_at ?? org.data?.created_at ?? null;
+    const formattedMemberSince = memberSinceSource
+      ? new Date(memberSinceSource).toLocaleDateString("en-US", dateFormat)
+      : null;
     const formattedDemoExpires = trialEndsAt
-      ? trialEndsAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-      : "September 8, 2026";
+      ? trialEndsAt.toLocaleDateString("en-US", dateFormat)
+      : null;
 
     res.json({
-      email: user.data?.email ?? req.auth!.email ?? "ayush.goel1910@gmail.com",
-      mobile: user.data?.phone ?? "+91 7428720768",
-      country: user.data?.country ?? "India",
-      name: user.data?.name ?? "Ayush",
-      organizationName: org.data?.name ?? "WA Automation Demo",
-      isDemo: org.data?.is_demo ?? true,
+      email: user.data?.email ?? req.auth!.email ?? null,
+      mobile: user.data?.phone ?? null,
+      country: user.data?.country ?? null,
+      name: user.data?.name ?? null,
+      organizationName: org.data?.name ?? null,
+      isDemo: org.data?.is_demo ?? false,
       plan: org.data?.plan ?? "trial",
       demoExpires: formattedDemoExpires,
       memberSince: formattedMemberSince,

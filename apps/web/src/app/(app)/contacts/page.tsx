@@ -1,48 +1,79 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNowStrict } from "date-fns";
 import {
+  ArrowDownUp,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
   Download,
-  MessageSquare,
+  FilterX,
+  MessageCircle,
   MoreHorizontal,
+  Pencil,
   Plus,
-  RefreshCw,
   Search,
+  Tags,
   Trash2,
   Upload,
-  UserPlus,
+  UserCheck,
+  UserX,
   Users,
   X,
-  FileSpreadsheet,
 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api-client";
-import { ContactDrawer } from "./contact-drawer";
+import { PageHeader } from "@/components/layout/page-header";
+import {
+  AnimatedNumber,
+  AnimatePresence,
+  ease,
+  motion,
+  SegmentedTabs,
+  Spotlight,
+  Stagger,
+  StaggerItem,
+} from "@/components/motion";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input, Select } from "@/components/ui/input";
 import { LoadingScreen } from "@/components/ui/loading-screen";
-
-interface Tag {
-  id: string;
-  name: string;
-  color: string;
-}
-
-interface Group {
-  id: string;
-  name: string;
-}
+import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
+import { api, ApiClientError } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { BulkBar, type BulkAction } from "./bulk-bar";
+import { ContactDrawer } from "./contact-drawer";
+import { downloadCsv, toCsv } from "./csv";
+import { ImportContactsModal } from "./import-modal";
+import { TagsModal } from "./tags-modal";
+import {
+  ContactAvatar,
+  formatPhone,
+  isUuid,
+  Modal,
+  optInLabel,
+  OptInBadge,
+  PopoverMenu,
+  TagChip,
+  useDebounced,
+  type GroupOption,
+  type OptInStatus,
+  type TagOption,
+} from "./ui";
+import { useStartConversation } from "./use-start-conversation";
 
 interface ContactRow {
   id: string;
   wa_id: string;
   name: string | null;
   email: string | null;
-  attributes?: Record<string, unknown>;
-  opt_in_status: "opted_in" | "opted_out" | "unknown";
+  attributes?: Record<string, unknown> | null;
+  opt_in_status: OptInStatus;
   source: string | null;
+  last_seen_at?: string | null;
   created_at: string;
-  contact_tags?: { tags: Tag | null }[];
-  contact_groups?: { groups: Group | null }[];
+  contact_tags?: { tag_id?: string; tags: TagOption | null }[];
 }
 
 interface ContactsResponse {
@@ -53,517 +84,878 @@ interface ContactsResponse {
   totalPages: number;
 }
 
-const DEFAULT_DEMO_CONTACTS: ContactRow[] = [
-  { id: "c1", wa_id: "7738293629", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-19T10:00:00.000Z" },
-  { id: "c2", wa_id: "8928814237", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-18T12:00:00.000Z" },
-  { id: "c3", wa_id: "9811110594", name: "Piyush A", email: "piyush@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-17T14:00:00.000Z" },
-  { id: "c4", wa_id: "7428720768", name: "Ayush", email: "ayush.goel1910@gmail.com", attributes: {}, opt_in_status: "opted_in", source: "manual", created_at: "2026-08-16T16:00:00.000Z" },
-  { id: "c5", wa_id: "7838349247", name: "Ankit Kumar", email: "ankit@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-11T09:00:00.000Z" },
-  { id: "c6", wa_id: "9540724184", name: "Sagar", email: "sagar@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-15T11:00:00.000Z" },
-  { id: "c7", wa_id: "9636480218", name: "9636480218", email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: "2026-08-09T18:00:00.000Z" },
-];
+type OptInFilter = "all" | OptInStatus;
+type SortKey = "newest" | "oldest" | "name" | "phone";
+
+const SORTS: Record<SortKey, { label: string; sortBy: string; sortDir: "asc" | "desc" }> = {
+  newest: { label: "Newest first", sortBy: "created_at", sortDir: "desc" },
+  oldest: { label: "Oldest first", sortBy: "created_at", sortDir: "asc" },
+  name: { label: "Name (A–Z)", sortBy: "name", sortDir: "asc" },
+  phone: { label: "Phone number", sortBy: "wa_id", sortDir: "asc" },
+};
+
+const PAGE_SIZES = [10, 25, 50, 100];
+
+function rowTags(contact: ContactRow) {
+  return (contact.contact_tags ?? []).map((ct) => ct.tags).filter((t): t is TagOption => !!t);
+}
 
 export default function ContactsPage() {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("last_updated");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const startConversation = useStartConversation();
+
+  const [searchInput, setSearchInput] = useState("");
+  // The API embeds the term in a PostgREST or() filter, where , ( ) * % \ are
+  // syntax — strip them so e.g. "Smith, John" searches instead of erroring.
+  const search = useDebounced(searchInput.replace(/[,()*%\\]/g, " ").replace(/\s+/g, " ").trim(), 300);
+  const [optIn, setOptIn] = useState<OptInFilter>("all");
+  const [tagId, setTagId] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [sort, setSort] = useState<SortKey>("newest");
   const [page, setPage] = useState(1);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [importModalOpen, setImportModalOpen] = useState(false);
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState(25);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const contactsQuery = useQuery({
-    queryKey: ["contacts", { page, search, sortBy }],
-    queryFn: () =>
-      api.get<ContactsResponse>("/contacts", {
-        page,
-        pageSize: rowsPerPage,
-        search: search || undefined,
-        sortBy: sortBy === "name" ? "name" : "created_at",
-      }),
+  const [drawer, setDrawer] = useState<{ open: boolean; contactId: string | null }>({
+    open: false,
+    contactId: null,
+  });
+  const [importOpen, setImportOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const filterParams = useMemo(
+    () => ({
+      search: search || undefined,
+      optInStatus: optIn === "all" ? undefined : optIn,
+      tagId: isUuid(tagId) ? tagId : undefined,
+      groupId: isUuid(groupId) ? groupId : undefined,
+      sortBy: SORTS[sort].sortBy,
+      sortDir: SORTS[sort].sortDir,
+    }),
+    [search, optIn, tagId, groupId, sort],
+  );
+
+  // Any change to what is listed resets paging and selection.
+  useEffect(() => {
+    setPage(1);
+  }, [filterParams, pageSize]);
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filterParams, page, pageSize]);
+
+  const contacts = useQuery({
+    queryKey: ["contacts", { page, pageSize, ...filterParams }],
+    queryFn: () => api.get<ContactsResponse>("/contacts", { page, pageSize, ...filterParams }),
+    placeholderData: keepPreviousData,
   });
 
-  const rawRows: ContactRow[] = useMemo(() => {
-    const apiData = contactsQuery.data?.data;
-    if (apiData && apiData.length >= 10) return apiData;
-    return DEFAULT_DEMO_CONTACTS;
-  }, [contactsQuery.data]);
+  const stats = useQuery({
+    queryKey: ["contacts", "stats"],
+    queryFn: async () => {
+      const [all, optedIn, optedOut] = await Promise.all([
+        api.get<ContactsResponse>("/contacts", { page: 1, pageSize: 1 }),
+        api.get<ContactsResponse>("/contacts", { page: 1, pageSize: 1, optInStatus: "opted_in" }),
+        api.get<ContactsResponse>("/contacts", { page: 1, pageSize: 1, optInStatus: "opted_out" }),
+      ]);
+      return { total: all.total, optedIn: optedIn.total, optedOut: optedOut.total };
+    },
+  });
 
-  // Real-time filtering and sorting
-  const filteredRows = useMemo(() => {
-    let result = [...rawRows];
+  const tagsQuery = useQuery({
+    queryKey: ["tags"],
+    queryFn: () => api.get<{ data: TagOption[] }>("/tags"),
+  });
+  const groupsQuery = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => api.get<{ data: GroupOption[] }>("/groups"),
+  });
+  const tagOptions = useMemo(() => (tagsQuery.data?.data ?? []).filter((t) => isUuid(t.id)), [tagsQuery.data]);
+  const groupOptions = useMemo(
+    () => (groupsQuery.data?.data ?? []).filter((g) => isUuid(g.id)),
+    [groupsQuery.data],
+  );
 
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (c) =>
-          (c.name && c.name.toLowerCase().includes(q)) ||
-          c.wa_id.includes(q) ||
-          (c.email && c.email.toLowerCase().includes(q))
-      );
-    }
+  const rows = contacts.data?.data ?? [];
+  const total = contacts.data?.total ?? 0;
+  const totalPages = Math.max(1, contacts.data?.totalPages ?? 1);
+  const hasFilters = !!(search || optIn !== "all" || tagId || groupId);
 
-    if (sortBy === "name") {
-      result.sort((a, b) => (a.name || a.wa_id).localeCompare(b.name || b.wa_id));
-    } else if (sortBy === "phone") {
-      result.sort((a, b) => a.wa_id.localeCompare(b.wa_id));
-    }
+  const invalidate = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    void queryClient.invalidateQueries({ queryKey: ["tags"] });
+    void queryClient.invalidateQueries({ queryKey: ["groups"] });
+  }, [queryClient]);
 
-    return result;
-  }, [rawRows, search, sortBy]);
+  // -------------------------------------------------------------- selection
+  const headerCheckbox = useRef<HTMLInputElement>(null);
+  const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const someOnPage = rows.some((r) => selected.has(r.id));
+  useEffect(() => {
+    if (headerCheckbox.current) headerCheckbox.current.indeterminate = someOnPage && !allOnPage;
+  }, [someOnPage, allOnPage]);
 
-  const totalCount = Math.max(contactsQuery.data?.total || 0, filteredRows.length);
-  const allSelected = filteredRows.length > 0 && selected.length === filteredRows.length;
+  const toggleRow = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () => setSelected(allOnPage ? new Set() : new Set(rows.map((r) => r.id)));
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelected(filteredRows.map((r) => r.id));
-    } else {
-      setSelected([]);
-    }
+  // -------------------------------------------------------------- mutations
+  const persistedIds = (ids: string[]) => {
+    const valid = ids.filter(isUuid);
+    if (valid.length === 0) toast.error("These are sample contacts and can't be changed.");
+    return valid;
   };
 
-  const handleSelectRow = (id: string) => {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+  const bulk = useMutation({
+    mutationFn: (input: BulkAction & { contactIds: string[] }) =>
+      api.post<{ affected: number }>("/contacts/bulk", input),
+    onSuccess: (data, input) => {
+      const verb =
+        input.action === "add_tags"
+          ? "Tagged"
+          : input.action === "remove_tags"
+            ? "Untagged"
+            : input.action === "add_groups"
+              ? "Added to group:"
+              : `Marked ${optInLabel(input.optInStatus).toLowerCase()}:`;
+      toast.success(`${verb} ${data.affected} contact${data.affected === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      invalidate();
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiClientError ? error.message : "Bulk update failed"),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 1) {
+        await api.delete(`/contacts/${ids[0]}`);
+        return ids.length;
+      }
+      const res = await api.post<{ affected: number }>("/contacts/bulk", { contactIds: ids, action: "delete" });
+      return res.affected;
+    },
+    onSuccess: (count, ids) => {
+      toast.success(`Deleted ${count} contact${count === 1 ? "" : "s"}`);
+      setConfirmDelete(null);
+      setSelected(new Set());
+      if (drawer.contactId && ids.includes(drawer.contactId)) setDrawer({ open: false, contactId: null });
+      invalidate();
+    },
+    onError: (error) =>
+      toast.error(error instanceof ApiClientError ? error.message : "Could not delete contacts"),
+  });
+
+  const requestDelete = (ids: string[]) => {
+    const valid = persistedIds(ids);
+    if (valid.length) setConfirmDelete(valid);
+  };
+
+  const runBulk = (action: BulkAction) => {
+    const ids = persistedIds([...selected]);
+    if (ids.length) bulk.mutate({ ...action, contactIds: ids });
+  };
+
+  // -------------------------------------------------------------- export
+  const exportRows = (list: ContactRow[], label: string) => {
+    const attrKeys = [...new Set(list.flatMap((c) => Object.keys(c.attributes ?? {})))];
+    const csv = toCsv(
+      ["Name", "Phone", "Email", "Opt-in status", "Tags", "Source", "Created at", ...attrKeys],
+      list.map((c) => [
+        c.name ?? "",
+        c.wa_id,
+        c.email ?? "",
+        c.opt_in_status,
+        rowTags(c)
+          .map((t) => t.name)
+          .join("; "),
+        c.source ?? "",
+        c.created_at,
+        ...attrKeys.map((k) => {
+          const v = c.attributes?.[k];
+          return v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+        }),
+      ]),
     );
+    downloadCsv(`contacts_${label}_${new Date().toISOString().slice(0, 10)}.csv`, csv);
+    toast.success(`Exported ${list.length.toLocaleString()} contact${list.length === 1 ? "" : "s"}`);
   };
 
-  // Export to CSV functionality
-  const handleExportCSV = () => {
-    const contactsToExport = selected.length > 0
-      ? filteredRows.filter((r) => selected.includes(r.id))
-      : filteredRows;
-
-    const headers = ["Name", "Phone Number", "Email", "Opt-In Status", "Source", "Created At"];
-    const rows = contactsToExport.map((c) => [
-      `"${c.name || ""}"`,
-      `"${c.wa_id}"`,
-      `"${c.email || ""}"`,
-      `"${c.opt_in_status}"`,
-      `"${c.source || ""}"`,
-      `"${c.created_at}"`,
-    ]);
-
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `contacts_export_${new Date().toISOString().split("T")[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    toast.success(`Exported ${contactsToExport.length} contacts to CSV`);
+  const exportAll = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const all: ContactRow[] = [];
+      let p = 1;
+      let pages = 1;
+      // 100 per page is the API maximum; cap at 10k rows for the browser.
+      do {
+        const res = await api.get<ContactsResponse>("/contacts", { ...filterParams, page: p, pageSize: 100 });
+        all.push(...res.data);
+        pages = res.totalPages;
+        p++;
+      } while (p <= pages && p <= 100);
+      if (all.length === 0) {
+        toast.info("There are no contacts to export");
+        return;
+      }
+      exportRows(all, hasFilters ? "filtered" : "all");
+    } catch (error) {
+      toast.error(error instanceof ApiClientError ? error.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (contactIds: string[]) =>
-      api.post("/contacts/bulk", { contactIds, action: "delete" }),
-    onSuccess: () => {
-      toast.success(`Deleted ${selected.length} contact(s)`);
-      setSelected([]);
-      void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+  const copyNumber = async (waId: string) => {
+    try {
+      await navigator.clipboard.writeText(`+${waId}`);
+      toast.success("Number copied");
+    } catch {
+      toast.error("Couldn't access the clipboard");
+    }
+  };
+
+  const clearFilters = () => {
+    setSearchInput("");
+    setOptIn("all");
+    setTagId("");
+    setGroupId("");
+  };
+
+  const openDrawer = (contactId: string | null) => setDrawer({ open: true, contactId });
+  const activeTag = tagOptions.find((t) => t.id === tagId);
+  const activeGroup = groupOptions.find((g) => g.id === groupId);
+  const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = Math.min(page * pageSize, total);
+
+  const statTiles = [
+    {
+      label: "Total contacts",
+      value: stats.data?.total,
+      icon: Users,
+      tint: "from-brand-600 to-brand-magenta",
+      hint: "In your audience",
     },
-    onError: () => {
-      // In demo mode, remove from local selection
-      toast.success(`Deleted ${selected.length} contact(s)`);
-      setSelected([]);
+    {
+      label: "Opted in",
+      value: stats.data?.optedIn,
+      icon: UserCheck,
+      tint: "from-emerald-500 to-teal-500",
+      hint:
+        stats.data && stats.data.total > 0
+          ? `${Math.round((stats.data.optedIn / stats.data.total) * 100)}% can receive marketing`
+          : "Can receive marketing",
     },
-  });
+    {
+      label: "Opted out",
+      value: stats.data?.optedOut,
+      icon: UserX,
+      tint: "from-brand-pink to-brand-orange",
+      hint: "Excluded from campaigns",
+    },
+    {
+      label: "Tags",
+      value: tagsQuery.isLoading ? undefined : tagOptions.length,
+      icon: Tags,
+      tint: "from-violet-500 to-brand-600",
+      hint: "Manage segments",
+      onClick: () => setTagsOpen(true),
+    },
+  ];
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto pb-12 font-poppins">
-      <LoadingScreen isLoading={contactsQuery.isLoading} />
+    <>
+      <LoadingScreen isLoading={contacts.isLoading} minDurationMs={600} />
 
-      {/* ========================================================= */}
-      {/* 1. Header Area */}
-      {/* ========================================================= */}
-      <div className="mb-6 rounded-3xl border border-gray-100 bg-white p-6 sm:p-7 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#00C268] text-white flex items-center justify-center shadow-xs shrink-0 mt-0.5">
-            <Users size={22} className="text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-900 tracking-tight">Contacts</h1>
-              <span className="text-xs font-semibold text-gray-400">({totalCount} in total)</span>
-            </div>
-            <p className="text-xs text-gray-500 mt-1 max-w-2xl leading-relaxed">
-              Contact list stores the list of numbers that you&apos;ve interacted with. You can even
-              manually export or import contacts.
-            </p>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void contactsQuery.refetch()}
-            aria-label="Refresh contacts"
-            className="grid h-10 w-10 place-items-center rounded-xl border border-gray-200 bg-white text-gray-600 shadow-2xs hover:bg-gray-50 transition-colors"
-          >
-            <RefreshCw
-              size={16}
-              className={contactsQuery.isFetching ? "animate-spin text-[#00C268]" : ""}
-            />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEditingId(null);
-              setDrawerOpen(true);
-            }}
-            className="flex h-10 items-center gap-2 rounded-xl bg-[#00C268] px-4 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#00ab5c] active:scale-95 shrink-0"
-          >
-            <Plus size={16} strokeWidth={2.5} />
-            Add Contact
-          </button>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 2. Controls / Search & Actions Row */}
-      {/* ========================================================= */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        {/* Left: Sorted by & Search */}
-        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-          {/* Sorted by dropdown */}
-          <div className="flex items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-2xs">
-            <span className="text-gray-400 font-normal">Sorted by:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer pr-1"
-            >
-              <option value="last_updated">Last Updated</option>
-              <option value="name">Name</option>
-              <option value="phone">Phone Number</option>
-            </select>
-          </div>
-
-          {/* Search box */}
-          <div className="relative flex-1 max-w-sm">
-            <Search
-              size={15}
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-            <input
-              type="text"
-              placeholder="Search contacts..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-10 w-full rounded-xl border border-gray-200/80 bg-white pl-9 pr-4 text-xs text-gray-800 placeholder:text-gray-400 shadow-2xs outline-none focus:border-[#00C268] focus:ring-2 focus:ring-[#00C268]/20 transition-all"
-            />
-          </div>
-        </div>
-
-        {/* Right: Export, Import, Bulk Delete */}
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="flex h-10 items-center gap-1.5 rounded-xl border border-gray-200/80 bg-white px-3.5 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition-colors"
-          >
-            <Download size={15} className="text-gray-500" />
-            Export
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setImportModalOpen(true)}
-            className="flex h-10 items-center gap-1.5 rounded-xl border border-gray-200/80 bg-white px-3.5 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition-colors"
-          >
-            <Upload size={15} className="text-gray-500" />
-            Import
-          </button>
-
-          <button
-            type="button"
-            disabled={selected.length === 0}
-            onClick={() => bulkDeleteMutation.mutate(selected)}
-            title={selected.length > 0 ? `Delete ${selected.length} selected` : "Select contacts to delete"}
-            className="grid h-10 w-10 place-items-center rounded-xl border border-gray-200/80 bg-white text-rose-500 shadow-2xs hover:bg-rose-50 hover:border-rose-200 disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-gray-200 transition-colors"
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 3. Contacts Table Card */}
-      {/* ========================================================= */}
-      <div className="rounded-3xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50/50 text-[11.5px] font-bold uppercase tracking-wider text-gray-500">
-                <th className="w-12 px-5 py-4">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={handleSelectAll}
-                    aria-label="Select all"
-                    className="h-4 w-4 rounded border-gray-300 text-[#00C268] focus:ring-[#00C268]/30 cursor-pointer"
-                  />
-                </th>
-                <th className="px-4 py-4">Name</th>
-                <th className="px-4 py-4">Phone Number</th>
-                <th className="px-4 py-4">Attributes</th>
-                <th className="px-4 py-4">Tags</th>
-                <th className="px-4 py-4">Groups</th>
-                <th className="px-4 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-xs">
-              {filteredRows.map((contact) => {
-                const isSelected = selected.includes(contact.id);
-                return (
-                  <tr
-                    key={contact.id}
-                    className={`hover:bg-gray-50/60 transition-colors ${isSelected ? "bg-emerald-50/40" : ""}`}
-                  >
-                    {/* Checkbox */}
-                    <td className="px-5 py-4">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleSelectRow(contact.id)}
-                        aria-label={`Select ${contact.name || contact.wa_id}`}
-                        className="h-4 w-4 rounded border-gray-300 text-[#00C268] focus:ring-[#00C268]/30 cursor-pointer"
-                      />
-                    </td>
-
-                    {/* Name Column */}
-                    <td className="px-4 py-4 font-semibold text-gray-900">
-                      {contact.name ? (
-                        <div className="flex items-center gap-1.5">
-                          <span>{contact.name}</span>
-                          <span className="grid h-4 w-4 place-items-center rounded-full bg-[#00C268] text-white">
-                            <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-current stroke-current" strokeWidth="2">
-                              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                            </svg>
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="grid h-6 w-6 place-items-center rounded-full bg-[#00C268] text-white">
-                          <MessageSquare size={13} className="fill-current" />
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Phone Number */}
-                    <td className="px-4 py-4 font-medium text-gray-700">
-                      {contact.wa_id}
-                    </td>
-
-                    {/* Attributes */}
-                    <td className="px-4 py-4 text-gray-400 font-normal">
-                      No attributes
-                    </td>
-
-                    {/* Tags */}
-                    <td className="px-4 py-4 text-gray-400 font-normal">
-                      No tags
-                    </td>
-
-                    {/* Groups */}
-                    <td className="px-4 py-4 text-gray-400 font-normal">
-                      No groups
-                    </td>
-
-                    {/* Actions Menu */}
-                    <td className="px-4 py-4 text-right relative">
-                      <div className="inline-block relative">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActiveMenuId((current) =>
-                              current === contact.id ? null : contact.id
-                            )
-                          }
-                          aria-label="More actions"
-                          className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                        >
-                          <MoreHorizontal size={16} />
-                        </button>
-
-                        {activeMenuId === contact.id && (
-                          <div className="absolute right-0 top-full mt-1 w-44 rounded-2xl border border-gray-100 bg-white p-2 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActiveMenuId(null);
-                                setEditingId(contact.id);
-                                setDrawerOpen(true);
-                              }}
-                              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                            >
-                              Edit Contact
-                            </button>
-                            <a
-                              href={`/inbox?contact=${contact.wa_id}`}
-                              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-[#00C268] hover:bg-emerald-50 transition-colors"
-                            >
-                              Start Conversation
-                            </a>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActiveMenuId(null);
-                                bulkDeleteMutation.mutate([contact.id]);
-                              }}
-                              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ========================================================= */}
-        {/* 4. Pagination */}
-        {/* ========================================================= */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-100 px-6 py-4 text-xs text-gray-500 font-medium bg-white">
-          <div className="flex items-center gap-2">
-            <span>Rows per page:</span>
-            <select
-              value={rowsPerPage}
-              onChange={(e) => {
-                setRowsPerPage(Number(e.target.value));
-                setPage(1);
-              }}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 outline-none cursor-pointer"
-            >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <span>
-              Page {page} of {Math.max(1, Math.ceil(totalCount / rowsPerPage))} (1-{filteredRows.length} of {totalCount})
-            </span>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-              >
-                &lt; Previous
-              </button>
-
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#00C268] text-xs font-bold text-white shadow-2xs">
-                {page}
-              </span>
-
-              <button
-                type="button"
-                disabled={page >= Math.ceil(totalCount / rowsPerPage)}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-              >
-                Next &gt;
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 5. Contact Drawer (Add / Edit) */}
-      {/* ========================================================= */}
-      <ContactDrawer
-        open={drawerOpen}
-        contactId={editingId}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={() => {
-          setDrawerOpen(false);
-          void queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      <PageHeader
+        title="Contacts"
+        description="Everyone you can reach on WhatsApp — segment with tags and groups, import from CSV, and keep opt-in status up to date."
+        onRefresh={() => {
+          invalidate();
         }}
+        refreshing={contacts.isFetching && !contacts.isLoading}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setImportOpen(true)} aria-label="Import contacts from CSV">
+              <Upload size={16} />
+              <span className="hidden sm:inline">Import</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void exportAll()}
+              loading={exporting}
+              aria-label={hasFilters ? "Export filtered contacts to CSV" : "Export all contacts to CSV"}
+            >
+              {!exporting && <Download size={16} />}
+              <span className="hidden sm:inline">Export</span>
+            </Button>
+            <Button onClick={() => openDrawer(null)}>
+              <Plus size={16} strokeWidth={2.5} />
+              Add contact
+            </Button>
+          </>
+        }
       />
 
-      {/* ========================================================= */}
-      {/* 6. Import CSV Modal */}
-      {/* ========================================================= */}
-      {importModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-3xl border border-gray-100 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-              <div className="flex items-center gap-2.5">
-                <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-[#00C268]">
-                  <FileSpreadsheet size={18} />
+      {/* KPI tiles */}
+      <Stagger className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4" stagger={0.07}>
+        {statTiles.map((tile) => {
+          const Icon = tile.icon;
+          const body = (
+            <Spotlight className="h-full rounded-2xl border border-border/80 bg-white p-4 shadow-soft transition-shadow duration-300 hover:shadow-lift sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-muted-foreground sm:text-sm">{tile.label}</p>
+                  <div className="mt-1.5 font-display text-2xl font-bold tracking-tight sm:text-3xl">
+                    {tile.value === undefined ? (
+                      <Skeleton className="h-8 w-16" />
+                    ) : (
+                      <AnimatedNumber value={tile.value} />
+                    )}
+                  </div>
                 </div>
-                <h3 className="text-base font-bold text-gray-900">Import Contacts CSV</h3>
+                <span
+                  className={cn(
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-[0_8px_20px_-8px_rgba(131,58,180,0.6)] sm:h-11 sm:w-11",
+                    tile.tint,
+                  )}
+                >
+                  <Icon size={19} />
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setImportModalOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
+              <p className="mt-2 truncate text-xs text-muted-foreground">{tile.hint}</p>
+            </Spotlight>
+          );
+          return (
+            <StaggerItem key={tile.label} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 320, damping: 24 }}>
+              {tile.onClick ? (
+                <button
+                  type="button"
+                  onClick={tile.onClick}
+                  className="block h-full w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  {body}
+                </button>
+              ) : (
+                body
+              )}
+            </StaggerItem>
+          );
+        })}
+      </Stagger>
 
-            <div className="mt-5 space-y-4">
-              <label className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/60 p-8 text-center hover:border-[#00C268] hover:bg-emerald-50/20 transition-all cursor-pointer">
-                <Upload size={28} className="text-[#00C268]" />
-                <div>
-                  <p className="text-xs font-bold text-gray-800">Click to upload or drag and drop</p>
-                  <p className="text-[11px] text-gray-400 mt-1">CSV file containing phone numbers & names</p>
-                </div>
-                <input
-                  type="file"
-                  accept=".csv"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) {
-                      toast.success(`Imported ${e.target.files[0].name} successfully!`);
-                      setImportModalOpen(false);
-                    }
-                  }}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease, delay: 0.15 }}
+      >
+        <Card className="overflow-hidden">
+          {/* Toolbar */}
+          <div className="space-y-3 border-b border-border/70 p-3 sm:p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  size={16}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
-              </label>
-
-              <div className="flex justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setImportModalOpen(false)}
-                  className="rounded-xl border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    toast.success("Contacts imported successfully!");
-                    setImportModalOpen(false);
-                  }}
-                  className="rounded-xl bg-[#00C268] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#00ab5c] transition-colors"
-                >
-                  Upload & Import
-                </button>
+                <Input
+                  aria-label="Search contacts"
+                  placeholder="Search by name, phone or email…"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="pl-10 pr-10"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => setSearchInput("")}
+                    className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-brand-50 hover:text-primary"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="scrollbar-none -mx-1 overflow-x-auto px-1">
+                <SegmentedTabs<OptInFilter>
+                  layoutId="contacts-optin"
+                  value={optIn}
+                  onChange={setOptIn}
+                  className="whitespace-nowrap"
+                  tabs={[
+                    { value: "all", label: "All" },
+                    { value: "opted_in", label: "Opted in" },
+                    { value: "opted_out", label: "Opted out" },
+                    { value: "unknown", label: "Unknown" },
+                  ]}
+                />
               </div>
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                aria-label="Filter by tag"
+                value={tagId}
+                onChange={(e) => setTagId(e.target.value)}
+                className="h-10 w-auto min-w-[9.5rem] flex-1 text-sm sm:flex-none"
+              >
+                <option value="">All tags</option>
+                {tagOptions.map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </Select>
+              {groupOptions.length > 0 && (
+                <Select
+                  aria-label="Filter by group"
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}
+                  className="h-10 w-auto min-w-[9.5rem] flex-1 text-sm sm:flex-none"
+                >
+                  <option value="">All groups</option>
+                  {groupOptions.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              <div className="relative flex-1 sm:flex-none">
+                <ArrowDownUp
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-muted-foreground"
+                />
+                <Select
+                  aria-label="Sort contacts"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  className="h-10 w-full min-w-[10.5rem] pl-9 text-sm sm:w-auto"
+                >
+                  {(Object.keys(SORTS) as SortKey[]).map((key) => (
+                    <option key={key} value={key}>
+                      {SORTS[key].label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button variant="ghost" size="sm" className="h-10" onClick={() => setTagsOpen(true)}>
+                <Tags size={15} />
+                Manage tags
+              </Button>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {hasFilters && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                    <span className="font-semibold text-muted-foreground">
+                      {contacts.isFetching ? "Filtering…" : `${total.toLocaleString()} match${total === 1 ? "" : "es"}`}
+                    </span>
+                    {search && <FilterChip label={`“${search}”`} onRemove={() => setSearchInput("")} />}
+                    {optIn !== "all" && <FilterChip label={optInLabel(optIn)} onRemove={() => setOptIn("all")} />}
+                    {activeTag && <FilterChip label={`Tag: ${activeTag.name}`} onRemove={() => setTagId("")} />}
+                    {activeGroup && <FilterChip label={`Group: ${activeGroup.name}`} onRemove={() => setGroupId("")} />}
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-semibold text-primary hover:bg-brand-50"
+                    >
+                      <FilterX size={13} />
+                      Clear all
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        </div>
-      )}
-    </div>
+
+          {/* Table */}
+          {contacts.isError ? (
+            <div className="p-6">
+              <ErrorState
+                message={
+                  contacts.error instanceof ApiClientError
+                    ? contacts.error.message
+                    : "Could not load your contacts."
+                }
+                onRetry={() => void contacts.refetch()}
+              />
+            </div>
+          ) : contacts.isLoading ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-14" />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            hasFilters ? (
+              <EmptyState
+                icon={Search}
+                title="No contacts match"
+                description="Try a different search term or remove some filters."
+                action={
+                  <Button variant="outline" onClick={clearFilters}>
+                    <FilterX size={16} />
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={Users}
+                title="Your audience starts here"
+                description="Add contacts one by one or import a CSV. Contacts who message you on WhatsApp appear here automatically."
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button variant="outline" onClick={() => setImportOpen(true)}>
+                      <Upload size={16} />
+                      Import CSV
+                    </Button>
+                    <Button onClick={() => openDrawer(null)}>
+                      <Plus size={16} />
+                      Add contact
+                    </Button>
+                  </div>
+                }
+              />
+            )
+          ) : (
+            <div
+              className={cn(
+                "scrollbar-thin relative w-full overflow-x-auto transition-opacity",
+                contacts.isPlaceholderData && "opacity-60",
+              )}
+            >
+              <table className="w-full text-sm md:min-w-[720px]">
+                <thead className="border-b bg-brand-50/40">
+                  <tr>
+                    <th className="w-12 py-3 pl-4 pr-2 text-left">
+                      <input
+                        ref={headerCheckbox}
+                        type="checkbox"
+                        checked={allOnPage}
+                        onChange={toggleAll}
+                        aria-label="Select all contacts on this page"
+                        className="h-4 w-4 cursor-pointer rounded border-brand-300 accent-[#833ab4]"
+                      />
+                    </th>
+                    {[
+                      { label: "Contact" },
+                      { label: "Phone", className: "hidden sm:table-cell" },
+                      { label: "Tags", className: "hidden md:table-cell" },
+                      { label: "Opt-in", className: "hidden sm:table-cell" },
+                      { label: "Source", className: "hidden xl:table-cell" },
+                      { label: "Added", className: "hidden lg:table-cell" },
+                    ].map((col) => (
+                      <th
+                        key={col.label}
+                        className={cn(
+                          "whitespace-nowrap px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground",
+                          col.className,
+                        )}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="w-14 px-4 py-3">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/70">
+                  {rows.map((contact, index) => {
+                    const isSelected = selected.has(contact.id);
+                    const tags = rowTags(contact);
+                    const label = contact.name || formatPhone(contact.wa_id);
+                    return (
+                      <motion.tr
+                        key={contact.id}
+                        initial={index < 20 ? { opacity: 0, y: 8 } : false}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, ease, delay: index < 20 ? index * 0.025 : 0 }}
+                        onClick={() => openDrawer(contact.id)}
+                        className={cn(
+                          "group cursor-pointer transition-colors duration-150",
+                          isSelected ? "bg-brand-50/80" : "hover:bg-brand-50/40",
+                        )}
+                      >
+                        <td className="py-3 pl-4 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleRow(contact.id)}
+                            aria-label={`Select ${label}`}
+                            className="h-4 w-4 cursor-pointer rounded border-brand-300 accent-[#833ab4]"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <ContactAvatar name={contact.name} waId={contact.wa_id} seed={contact.id} />
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-foreground transition-colors group-hover:text-primary">
+                                {contact.name || <span className="text-muted-foreground">Unnamed</span>}
+                              </p>
+                              <p className="hidden max-w-[14rem] truncate text-xs text-muted-foreground sm:block">
+                                {contact.email || "No email"}
+                              </p>
+                              {/* Phones hide the Phone column, so the number moves under the name. */}
+                              <p className="truncate font-mono text-xs text-muted-foreground sm:hidden">
+                                {formatPhone(contact.wa_id)}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="hidden whitespace-nowrap px-4 py-3 font-mono text-[13px] text-foreground/80 sm:table-cell">
+                          {formatPhone(contact.wa_id)}
+                        </td>
+                        <td className="hidden px-4 py-3 md:table-cell">
+                          {tags.length ? (
+                            <div className="flex max-w-[16rem] flex-wrap gap-1">
+                              {tags.slice(0, 3).map((tag) => (
+                                <TagChip key={tag.id} tag={tag} />
+                              ))}
+                              {tags.length > 3 && (
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                                  +{tags.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/70">—</span>
+                          )}
+                        </td>
+                        <td className="hidden px-4 py-3 sm:table-cell">
+                          <OptInBadge status={contact.opt_in_status} />
+                        </td>
+                        <td className="hidden whitespace-nowrap px-4 py-3 text-xs capitalize text-muted-foreground xl:table-cell">
+                          {contact.source ? contact.source.replace(/_/g, " ") : "—"}
+                        </td>
+                        <td
+                          className="hidden whitespace-nowrap px-4 py-3 text-xs text-muted-foreground lg:table-cell"
+                          title={new Date(contact.created_at).toLocaleString()}
+                        >
+                          {formatDistanceToNowStrict(new Date(contact.created_at), { addSuffix: true })}
+                        </td>
+                        <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <PopoverMenu
+                            label={`Actions for ${label}`}
+                            trigger={<MoreHorizontal size={17} />}
+                            items={[
+                              { label: "Edit contact", icon: Pencil, onSelect: () => openDrawer(contact.id) },
+                              {
+                                label: "Send message",
+                                icon: MessageCircle,
+                                tone: "brand",
+                                onSelect: () => startConversation.mutate(contact.id),
+                              },
+                              { label: "Copy number", icon: Copy, onSelect: () => void copyNumber(contact.wa_id) },
+                              {
+                                label: "Delete",
+                                icon: Trash2,
+                                tone: "danger",
+                                onSelect: () => requestDelete([contact.id]),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Footer / pagination */}
+          {total > 0 && !contacts.isError && (
+            <div className="flex flex-col gap-3 border-t border-border/70 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <span>
+                  <span className="font-semibold text-foreground">
+                    {firstRow.toLocaleString()}–{lastRow.toLocaleString()}
+                  </span>{" "}
+                  of {total.toLocaleString()}
+                </span>
+                <span className="hidden h-4 w-px bg-border sm:block" />
+                <label className="flex items-center gap-2">
+                  <span className="hidden sm:inline">Rows</span>
+                  <Select
+                    aria-label="Rows per page"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="h-9 w-[4.75rem] pl-3 pr-8 text-sm"
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              </div>
+              <PageButtons page={page} totalPages={totalPages} onChange={setPage} />
+            </div>
+          )}
+        </Card>
+      </motion.div>
+
+      {/* Keeps the pagination reachable above the floating bulk-action bar. */}
+      {selected.size > 0 && <div aria-hidden className="h-24 sm:h-20" />}
+
+      <BulkBar
+        count={selected.size}
+        tags={tagOptions}
+        groups={groupOptions}
+        pending={bulk.isPending}
+        onAction={runBulk}
+        onExport={() => exportRows(rows.filter((r) => selected.has(r.id)), "selected")}
+        onDelete={() => requestDelete([...selected])}
+        onClear={() => setSelected(new Set())}
+      />
+
+      <ContactDrawer
+        open={drawer.open}
+        contactId={drawer.contactId}
+        onClose={() => setDrawer((d) => ({ ...d, open: false }))}
+        onSaved={() => {
+          setDrawer((d) => ({ ...d, open: false }));
+          invalidate();
+          if (drawer.contactId) void queryClient.invalidateQueries({ queryKey: ["contact", drawer.contactId] });
+        }}
+        onDelete={(id) => requestDelete([id])}
+      />
+
+      <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />
+
+      <TagsModal
+        open={tagsOpen}
+        onClose={() => setTagsOpen(false)}
+        activeTagId={tagId}
+        onFilter={setTagId}
+      />
+
+      <Modal
+        open={!!confirmDelete}
+        onClose={() => !remove.isPending && setConfirmDelete(null)}
+        icon={Trash2}
+        tone="danger"
+        title={`Delete ${confirmDelete?.length ?? 0} contact${confirmDelete?.length === 1 ? "" : "s"}?`}
+        description="Their conversations, tags and group memberships are removed too. This can't be undone."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)} disabled={remove.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              loading={remove.isPending}
+              onClick={() => confirmDelete && remove.mutate(confirmDelete)}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      />
+    </>
+  );
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <motion.span
+      layout
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 py-0.5 pl-2.5 pr-1 font-semibold text-brand-700"
+    >
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove filter ${label}`}
+        className="grid h-5 w-5 place-items-center rounded-full hover:bg-white"
+      >
+        <X size={11} />
+      </button>
+    </motion.span>
+  );
+}
+
+function PageButtons({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}) {
+  // Compact window: first, last, current ±1, with gaps.
+  const pages = [...new Set([1, page - 1, page, page + 1, totalPages])]
+    .filter((p) => p >= 1 && p <= totalPages)
+    .sort((a, b) => a - b);
+
+  const btn =
+    "grid h-9 min-w-9 place-items-center rounded-lg px-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-40";
+
+  return (
+    <nav aria-label="Pagination" className="flex items-center gap-1 self-end sm:self-auto">
+      <button
+        type="button"
+        aria-label="Previous page"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+        className={cn(btn, "border bg-white hover:border-brand-200 hover:bg-brand-50")}
+      >
+        <ChevronLeft size={16} />
+      </button>
+      {pages.map((p, i) => (
+        <span key={p} className="flex items-center gap-1">
+          {i > 0 && p - pages[i - 1]! > 1 && <span className="px-1 text-muted-foreground">…</span>}
+          <button
+            type="button"
+            aria-current={p === page ? "page" : undefined}
+            onClick={() => onChange(p)}
+            className={cn(
+              btn,
+              "relative",
+              p === page ? "text-white" : "text-muted-foreground hover:bg-brand-50 hover:text-foreground",
+            )}
+          >
+            {p === page && (
+              <motion.span
+                layoutId="contacts-page-indicator"
+                className="absolute inset-0 rounded-lg bg-brand-gradient shadow-glow"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <span className="relative">{p}</span>
+          </button>
+        </span>
+      ))}
+      <button
+        type="button"
+        aria-label="Next page"
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+        className={cn(btn, "border bg-white hover:border-brand-200 hover:bg-brand-50")}
+      >
+        <ChevronRight size={16} />
+      </button>
+    </nav>
   );
 }

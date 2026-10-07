@@ -85,29 +85,24 @@ contactsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
     const id = req.params.id ?? "";
-    if (isDemoMode || req.auth?.accessToken === "demo" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    if (isDemoMode || req.auth?.accessToken === "demo") {
       const found = demoData.contacts.data.find((c) => c.id === id) ?? demoData.contacts.data[0];
       return res.json(found);
     }
-
-    try {
-      const { data, error } = await supabaseAdmin
-        .from("contacts")
-        .select("*, contact_tags(tags(id, name, color)), contact_groups(groups(id, name))")
-        .eq("organization_id", req.auth!.organizationId)
-        .eq("id", req.params.id!)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) {
-        const found = demoData.contacts.data.find((c) => c.id === req.params.id) ?? demoData.contacts.data[0];
-        return res.json(found);
-      }
-      res.json(data);
-    } catch {
-      const found = demoData.contacts.data.find((c) => c.id === req.params.id) ?? demoData.contacts.data[0];
-      return res.json(found);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw notFound("Contact");
     }
+
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .select("*, contact_tags(tags(id, name, color)), contact_groups(groups(id, name))")
+      .eq("organization_id", req.auth!.organizationId)
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) throw notFound("Contact");
+    res.json(data);
   }),
 );
 

@@ -1,4 +1,5 @@
 import { createClient } from "./supabase/server";
+import { DEMO_TOKEN, isWebDemo } from "./demo";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -8,16 +9,19 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
  * not-yet-bootstrapped state rather than crashing the whole route.
  */
 export async function serverFetch<T>(path: string): Promise<T | null> {
-  const supabase = await createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) return null;
+  let accessToken = DEMO_TOKEN;
+  if (!isWebDemo) {
+    const supabase = await createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return null;
+    accessToken = session.access_token;
+  }
 
   try {
     const response = await fetch(`${BASE_URL}/api${path}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
     });
     if (!response.ok) return null;

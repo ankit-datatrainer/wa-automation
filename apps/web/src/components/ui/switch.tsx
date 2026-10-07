@@ -31,7 +31,7 @@ export function Switch({
       onClick={() => onCheckedChange(!checked)}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
-        checked ? "bg-[#00C268]" : "bg-muted-foreground/30",
+        checked ? "bg-brand-gradient shadow-[0_2px_8px_-2px_rgba(131,58,180,0.5)]" : "bg-muted-foreground/25",
         disabled && "cursor-not-allowed opacity-50",
         className,
       )}

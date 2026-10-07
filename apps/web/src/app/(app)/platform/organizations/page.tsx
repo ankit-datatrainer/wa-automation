@@ -1,22 +1,24 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, CreditCard, Plus, Search, ShieldAlert, ShieldCheck, Wallet } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, CreditCard, Eye, Plus, ShieldAlert, ShieldCheck, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
+import { AnimatePresence, FadeIn, SegmentedTabs } from "@/components/motion";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Select } from "@/components/ui/input";
 import { Pagination, Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
-import { api, ApiClientError } from "@/lib/api-client";
-import { formatCurrency } from "@/lib/utils";
+import { api } from "@/lib/api-client";
+import { formatCurrency, initials } from "@/lib/utils";
+import { MotionTR, SearchField, useDebouncedValue } from "../_components/ui";
 import { AssignPlanDialog } from "./assign-plan-dialog";
 import { CreateOrgDialog } from "./create-org-dialog";
 import { OrgDetailsDrawer } from "./org-details-drawer";
+import { SuspendDialog, type SuspendTarget } from "./suspend-dialog";
+import { WalletDialog, type WalletTarget } from "./wallet-dialog";
 
 interface Org {
   id: string;
@@ -33,56 +35,31 @@ interface Org {
   contactCount: number;
 }
 
+type StatusFilter = "" | "false" | "true";
+
 export default function PlatformOrganizationsPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [suspended, setSuspended] = useState("");
-  const [walletTarget, setWalletTarget] = useState<Org | null>(null);
-  const [walletAmount, setWalletAmount] = useState("");
-  const [walletNote, setWalletNote] = useState("");
-  const [planTarget, setPlanTarget] = useState<Org | null>(null);
-  const [detailTarget, setDetailTarget] = useState<Org | null>(null);
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const [suspended, setSuspended] = useState<StatusFilter>("");
+  const [walletTarget, setWalletTarget] = useState<WalletTarget | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<SuspendTarget | null>(null);
+  const [planTarget, setPlanTarget] = useState<{ id: string; name: string } | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   const orgs = useQuery({
-    queryKey: ["platform", "organizations", { page, search, suspended }],
+    queryKey: ["platform", "organizations", { page, search: debouncedSearch, suspended }],
     queryFn: () =>
       api.get<{ data: Org[]; page: number; totalPages: number; total: number }>(
         "/platform/organizations",
-        { page, pageSize: 25, search, suspended: suspended || undefined },
+        { page, pageSize: 25, search: debouncedSearch, suspended: suspended || undefined },
       ),
+    placeholderData: (previous) => previous,
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["platform"] });
-
-  const toggleSuspend = useMutation({
-    mutationFn: ({ id, next, reason }: { id: string; next: boolean; reason?: string }) =>
-      api.post(`/platform/organizations/${id}/suspend`, { suspended: next, reason }),
-    onSuccess: (_, vars) => {
-      toast.success(vars.next ? "Organization suspended" : "Organization restored");
-      void invalidate();
-    },
-    onError: (error) =>
-      toast.error(error instanceof ApiClientError ? error.message : "Could not update"),
-  });
-
-  const adjustWallet = useMutation({
-    mutationFn: () =>
-      api.post(`/platform/organizations/${walletTarget!.id}/wallet`, {
-        amount: Number(walletAmount),
-        description: walletNote.trim() || "Platform adjustment",
-      }),
-    onSuccess: () => {
-      toast.success("Wallet adjusted");
-      setWalletTarget(null);
-      setWalletAmount("");
-      setWalletNote("");
-      void invalidate();
-    },
-    onError: (error) =>
-      toast.error(error instanceof ApiClientError ? error.message : "Adjustment failed"),
-  });
 
   const rows = orgs.data?.data ?? [];
 
@@ -90,16 +67,14 @@ export default function PlatformOrganizationsPage() {
     <>
       <PageHeader
         title="Organizations"
-        description="Every tenant on the platform. Suspend, adjust balances, or inspect usage."
+        description="Every tenant on the platform. Inspect usage, assign plans, adjust balances or suspend access."
         onRefresh={() => void orgs.refetch()}
         refreshing={orgs.isFetching}
         actions={
           <>
-            <Link href="/platform/plans">
-              <Button variant="outline">
-                <CreditCard size={16} />
-                Manage plans
-              </Button>
+            <Link href="/platform/plans" className={buttonVariants({ variant: "outline" })}>
+              <CreditCard size={16} />
+              Manage plans
             </Link>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus size={16} />
@@ -109,256 +84,227 @@ export default function PlatformOrganizationsPage() {
         }
       />
 
-      {walletTarget && (
-        <Card className="mb-4 p-5">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              adjustWallet.mutate();
-            }}
-            className="space-y-4"
-          >
-            <div>
-              <p className="font-bold">Adjust wallet — {walletTarget.name}</p>
-              <p className="text-sm text-muted-foreground">
-                Current balance {formatCurrency(Number(walletTarget.wallet_balance), walletTarget.currency)}.
-                Use a negative amount to debit.
-              </p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-[200px_1fr_auto]">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Amount</label>
-                <Input
-                  required
-                  type="number"
-                  step="0.01"
-                  value={walletAmount}
-                  onChange={(e) => setWalletAmount(e.target.value)}
-                  placeholder="500"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Reason</label>
-                <Input
-                  value={walletNote}
-                  onChange={(e) => setWalletNote(e.target.value)}
-                  placeholder="Goodwill credit"
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <Button type="submit" loading={adjustWallet.isPending}>
-                  Apply
-                </Button>
-                <Button type="button" variant="outline" onClick={() => setWalletTarget(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </form>
-        </Card>
-      )}
-
-      <Card>
-        <div className="flex flex-wrap items-center gap-3 border-b p-4">
-          <div className="relative min-w-64 flex-1">
-            <Search
-              size={16}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              placeholder="Search organizations..."
-              className="pl-9"
+      <FadeIn>
+        <Card className="overflow-hidden">
+          <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">
+            <SearchField
+              label="Search organizations"
+              placeholder="Search organizations by name…"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
+              onChange={(value) => {
+                setSearch(value);
                 setPage(1);
               }}
             />
+            <div className="scrollbar-none overflow-x-auto">
+              <SegmentedTabs<StatusFilter>
+                layoutId="org-status-filter"
+                value={suspended}
+                onChange={(value) => {
+                  setSuspended(value);
+                  setPage(1);
+                }}
+                tabs={[
+                  { value: "", label: "All" },
+                  { value: "false", label: "Active" },
+                  { value: "true", label: "Suspended" },
+                ]}
+              />
+            </div>
           </div>
-          <Select
-            className="w-48"
-            value={suspended}
-            onChange={(e) => {
-              setSuspended(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All organizations</option>
-            <option value="false">Active only</option>
-            <option value="true">Suspended only</option>
-          </Select>
-        </div>
 
-        {orgs.isError ? (
-          <ErrorState
-            message="Could not load organizations. This area is restricted to platform administrators."
-            onRetry={() => void orgs.refetch()}
-          />
-        ) : orgs.isLoading ? (
-          <div className="space-y-2 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-12" />
-            ))}
-          </div>
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={Building2}
-            title="No organizations found"
-            description="No tenant matches the current filter."
-          />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Organization</TH>
-                  <TH>Plan</TH>
-                  <TH>Members</TH>
-                  <TH>Contacts</TH>
-                  <TH>Balance</TH>
-                  <TH>Status</TH>
-                  <TH className="text-right">Actions</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {rows.map((org) => (
-                  <TR key={org.id}>
-                    <TD>
-                      <p className="font-medium">{org.name}</p>
-                      <p className="font-mono text-xs text-muted-foreground">{org.slug}</p>
-                    </TD>
-                    <TD>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge className="capitalize">{org.plan}</Badge>
-                        {org.is_demo && <Badge tone="info">Demo</Badge>}
-                      </div>
-                    </TD>
-                    <TD>{org.memberCount}</TD>
-                    <TD>{org.contactCount}</TD>
-                    <TD className="font-medium">
-                      {formatCurrency(Number(org.wallet_balance), org.currency)}
-                    </TD>
-                    <TD>
-                      {org.is_suspended ? (
-                        <div className="space-y-1">
-                          <Badge tone="danger">
-                            <ShieldAlert size={12} />
-                            Suspended
-                          </Badge>
-                          {org.suspended_reason && (
-                            <p className="max-w-40 truncate text-xs text-muted-foreground">
-                              {org.suspended_reason}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge tone="success">
-                          <ShieldCheck size={12} />
-                          Active
-                        </Badge>
-                      )}
-                    </TD>
-                    <TD>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setDetailTarget(org)}
-                        >
-                          Inspect
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setPlanTarget(org)}>
-                          <CreditCard size={14} />
-                          Plan
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setWalletTarget(org);
-                            setWalletAmount("");
-                            setWalletNote("");
-                          }}
-                        >
-                          <Wallet size={14} />
-                          Wallet
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={org.is_suspended ? "outline" : "destructive"}
-                          loading={
-                            toggleSuspend.isPending && toggleSuspend.variables?.id === org.id
-                          }
-                          onClick={() => {
-                            const next = !org.is_suspended;
-                            const reason = next
-                              ? window.prompt("Reason for suspension (shown to the tenant):") ??
-                                undefined
-                              : undefined;
-                            // A cancelled prompt aborts the suspension entirely.
-                            if (next && reason === undefined) return;
-                            toggleSuspend.mutate({ id: org.id, next, reason });
-                          }}
-                        >
-                          {org.is_suspended ? "Restore" : "Suspend"}
-                        </Button>
-                      </div>
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-
-            <Pagination
-              page={orgs.data!.page}
-              totalPages={orgs.data!.totalPages}
-              total={orgs.data!.total}
-              onPageChange={setPage}
+          {orgs.isError ? (
+            <div className="p-4">
+              <ErrorState
+                message="Could not load organizations. This area is restricted to platform administrators."
+                onRetry={() => void orgs.refetch()}
+              />
+            </div>
+          ) : orgs.isLoading ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-14" />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={Building2}
+              title="No organizations found"
+              description={search || suspended ? "No tenant matches the current filter." : "Create the first tenant to get started."}
+              action={
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus size={16} />
+                  New organization
+                </Button>
+              }
             />
-          </>
+          ) : (
+            <>
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Organization</TH>
+                    <TH>Plan</TH>
+                    <TH className="text-right">Members</TH>
+                    <TH className="text-right">Contacts</TH>
+                    <TH className="text-right">Balance</TH>
+                    <TH>Status</TH>
+                    <TH className="text-right">Actions</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {rows.map((org, index) => (
+                    <MotionTR key={org.id} index={index} className="group">
+                      <TD>
+                        <button
+                          type="button"
+                          onClick={() => setDetailId(org.id)}
+                          className="flex items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-xs font-bold text-primary ring-1 ring-inset ring-brand-100 transition group-hover:bg-brand-gradient group-hover:text-white group-hover:ring-transparent">
+                            {initials(org.name)}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block max-w-[220px] truncate font-semibold">{org.name}</span>
+                            <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground">
+                              {org.slug}
+                            </span>
+                          </span>
+                        </button>
+                      </TD>
+                      <TD>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge tone="brand" className="capitalize">
+                            {org.plan}
+                          </Badge>
+                          {org.is_demo && <Badge tone="info">Demo</Badge>}
+                        </div>
+                      </TD>
+                      <TD className="text-right tabular-nums">{org.memberCount.toLocaleString()}</TD>
+                      <TD className="text-right tabular-nums">{org.contactCount.toLocaleString()}</TD>
+                      <TD className="whitespace-nowrap text-right font-semibold tabular-nums">
+                        {formatCurrency(Number(org.wallet_balance), org.currency)}
+                      </TD>
+                      <TD>
+                        {org.is_suspended ? (
+                          <div className="space-y-1">
+                            <Badge tone="danger">
+                              <ShieldAlert size={12} />
+                              Suspended
+                            </Badge>
+                            {org.suspended_reason && (
+                              <p className="max-w-40 truncate text-xs text-muted-foreground" title={org.suspended_reason}>
+                                {org.suspended_reason}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge tone="success">
+                            <ShieldCheck size={12} />
+                            Active
+                          </Badge>
+                        )}
+                      </TD>
+                      <TD>
+                        <div className="flex justify-end gap-1.5">
+                          <Button size="sm" variant="secondary" onClick={() => setDetailId(org.id)}>
+                            <Eye size={14} />
+                            Inspect
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-9 w-9"
+                            aria-label={`Assign plan to ${org.name}`}
+                            title="Assign plan"
+                            onClick={() => setPlanTarget({ id: org.id, name: org.name })}
+                          >
+                            <CreditCard size={15} />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-9 w-9"
+                            aria-label={`Adjust wallet of ${org.name}`}
+                            title="Adjust wallet"
+                            onClick={() => setWalletTarget(org)}
+                          >
+                            <Wallet size={15} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={org.is_suspended ? "outline" : "ghost"}
+                            className={org.is_suspended ? undefined : "text-destructive hover:bg-rose-50"}
+                            onClick={() => setSuspendTarget(org)}
+                          >
+                            {org.is_suspended ? "Restore" : "Suspend"}
+                          </Button>
+                        </div>
+                      </TD>
+                    </MotionTR>
+                  ))}
+                </TBody>
+              </Table>
+
+              <Pagination
+                page={orgs.data!.page}
+                totalPages={orgs.data!.totalPages}
+                total={orgs.data!.total}
+                onPageChange={setPage}
+              />
+            </>
+          )}
+        </Card>
+      </FadeIn>
+
+      <AnimatePresence>
+        {detailId && (
+          <OrgDetailsDrawer
+            key={`details-${detailId}`}
+            organizationId={detailId}
+            onClose={() => setDetailId(null)}
+            onOpenWallet={(o) => setWalletTarget(o)}
+            onOpenPlan={(o) => {
+              setDetailId(null);
+              setPlanTarget({ id: o.id, name: o.name });
+            }}
+            onToggleSuspend={(o) => setSuspendTarget(o)}
+          />
         )}
-      </Card>
+      </AnimatePresence>
 
-      {detailTarget && (
-        <OrgDetailsDrawer
-          organizationId={detailTarget.id}
-          onClose={() => setDetailTarget(null)}
-          onOpenWallet={(o) => {
-            setDetailTarget(null);
-            setWalletTarget(o as Org);
-            setWalletAmount("");
-            setWalletNote("");
-          }}
-          onOpenPlan={(o) => {
-            setDetailTarget(null);
-            setPlanTarget(o as Org);
-          }}
-          onToggleSuspend={(o) => {
-            const next = !o.is_suspended;
-            const reason = next
-              ? window.prompt("Reason for suspension (shown to the tenant):") ?? undefined
-              : undefined;
-            if (next && reason === undefined) return;
-            toggleSuspend.mutate({ id: o.id, next, reason });
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {planTarget && (
+          <AssignPlanDialog
+            key={`plan-${planTarget.id}`}
+            organizationId={planTarget.id}
+            organizationName={planTarget.name}
+            onClose={() => setPlanTarget(null)}
+          />
+        )}
+      </AnimatePresence>
 
-      {planTarget && (
-        <AssignPlanDialog
-          organizationId={planTarget.id}
-          organizationName={planTarget.name}
-          onClose={() => setPlanTarget(null)}
-        />
-      )}
+      <AnimatePresence>
+        {createOpen && (
+          <CreateOrgDialog key="create-org" onClose={() => setCreateOpen(false)} onCreated={() => void invalidate()} />
+        )}
+      </AnimatePresence>
 
-      {createOpen && (
-        <CreateOrgDialog
-          onClose={() => setCreateOpen(false)}
-          onCreated={() => void invalidate()}
-        />
-      )}
+      <AnimatePresence>
+        {walletTarget && (
+          <WalletDialog key={`wallet-${walletTarget.id}`} org={walletTarget} onClose={() => setWalletTarget(null)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {suspendTarget && (
+          <SuspendDialog
+            key={`suspend-${suspendTarget.id}`}
+            org={suspendTarget}
+            onClose={() => setSuspendTarget(null)}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

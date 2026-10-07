@@ -60,7 +60,8 @@ platformRouter.get(
         supabaseAdmin
           .from("support_tickets")
           .select("id", { count: "exact", head: true })
-          .in("status", ["open", "pending", "in_progress"]),
+          // Values must exist in the ticket_status enum, or the whole count errors out to 0.
+          .in("status", ["open", "in_progress", "waiting"]),
       ]);
 
     // Wallet balances summed across every tenant.
@@ -908,6 +909,21 @@ platformRouter.patch(
     );
 
     res.sendStatus(204);
+  }),
+);
+
+/** The full thread for a ticket, internal notes included — read by the platform support desk. */
+platformRouter.get(
+  "/support-tickets/:id/messages",
+  asyncHandler(async (req, res) => {
+    const { data, error } = await supabaseAdmin
+      .from("ticket_messages")
+      .select("id, body, is_internal, created_at, users:author_id(id, name, email)")
+      .eq("ticket_id", req.params.id!)
+      .order("created_at");
+
+    if (error) throw error;
+    res.json({ data: data ?? [] });
   }),
 );
 

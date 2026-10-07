@@ -47,7 +47,9 @@ export async function requireAuth(
     }
     const accessToken = header.slice("Bearer ".length);
 
-    if (accessToken === "demo") {
+    // The fake "demo" session is a development convenience only; in
+    // production it would be an unauthenticated owner login.
+    if (accessToken === "demo" && process.env.NODE_ENV !== "production") {
       req.auth = { ...demoAuth };
       return next();
     }

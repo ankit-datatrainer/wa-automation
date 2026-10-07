@@ -115,7 +115,7 @@ export function LoadingScreen({
   return (
     <div
       className={cn(
-        "bg-white dark:bg-zinc-950 flex flex-col justify-between items-center select-none",
+        "bg-white flex flex-col justify-between items-center select-none",
         fullScreen
           ? "fixed inset-0 z-50 transition-all duration-500 ease-out"
           : "relative min-h-[500px] w-full py-16",
@@ -124,7 +124,7 @@ export function LoadingScreen({
       )}
       style={{
         backgroundImage:
-          "radial-gradient(ellipse 60% 50% at 50% 42%, rgba(0, 194, 104, 0.08) 0%, rgba(34, 197, 94, 0.02) 60%, transparent 100%)",
+          "radial-gradient(ellipse 60% 50% at 50% 42%, rgba(131, 58, 180, 0.10) 0%, rgba(225, 48, 108, 0.03) 60%, transparent 100%)",
       }}
       role="progressbar"
       aria-valuenow={progress}
@@ -140,40 +140,40 @@ export function LoadingScreen({
         <WALogo size="lg" withGlow={true} />
 
         {/* Tagline */}
-        <p className="mt-4 text-[13px] sm:text-sm font-medium text-gray-500 dark:text-gray-400 tracking-wide">
+        <p className="mt-4 text-[13px] sm:text-sm font-medium text-gray-500 tracking-wide">
           {tagline}
         </p>
 
         {/* Progress Bar */}
         <div className="w-full max-w-[340px] sm:max-w-[380px] mt-10">
-          <div className="h-[6px] w-full bg-gray-200/80 dark:bg-zinc-800 rounded-full overflow-hidden p-[0.5px]">
+          <div className="h-[6px] w-full bg-brand-100 rounded-full overflow-hidden p-[0.5px]">
             <div
-              className="h-full bg-gradient-to-r from-[#00D26A] via-[#00C268] to-[#00A859] rounded-full transition-all duration-150 ease-out shadow-[0_0_12px_rgba(0,194,104,0.4)]"
+              className="h-full bg-brand-gradient rounded-full transition-all duration-150 ease-out shadow-glow"
               style={{ width: `${progress}%` }}
             />
           </div>
         </div>
 
         {/* Status Message & Three Animated Pulsing Dots */}
-        <div className="mt-7 flex items-center justify-center gap-2 text-[13px] sm:text-sm font-medium text-gray-600 dark:text-gray-300 min-h-[24px]">
+        <div className="mt-7 flex items-center justify-center gap-2 text-[13px] sm:text-sm font-medium text-gray-600 min-h-[24px]">
           {/* Animated 3 Green Pulsing Dots */}
           <span className="flex items-center gap-1 shrink-0" aria-hidden="true">
-            <span className="h-2 w-2 rounded-full bg-[#00C268] animate-bounce [animation-delay:-0.3s]" />
-            <span className="h-2 w-2 rounded-full bg-[#00C268] animate-bounce [animation-delay:-0.15s]" />
-            <span className="h-2 w-2 rounded-full bg-[#00C268] animate-bounce" />
+            <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+            <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+            <span className="h-2 w-2 rounded-full bg-primary animate-bounce" />
           </span>
           <span className="truncate">{getStepText(progress)}</span>
         </div>
 
         {/* Dynamic Percentage */}
-        <div className="mt-2 text-sm sm:text-base font-bold text-[#00C268] tracking-tight">
+        <div className="mt-2 text-sm sm:text-base font-bold text-primary tracking-tight">
           {progress}%
         </div>
       </div>
 
       {/* Bottom Home Indicator Bar matching the reference UI */}
       <div className="w-full flex justify-center pb-6">
-        <div className="w-12 h-1.5 bg-gray-300 dark:bg-zinc-700 rounded-full opacity-80" />
+        <div className="w-12 h-1.5 bg-gray-300 rounded-full opacity-80" />
       </div>
     </div>
   );

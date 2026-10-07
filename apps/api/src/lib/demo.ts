@@ -20,7 +20,7 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString
 
 export const demoData = {
   me: {
-    user: { id: DEMO_USER_ID, email: "ayush.goel1910@gmail.com", name: "Ayush", phone: "+91 7428720768", country: "India" },
+    user: { id: DEMO_USER_ID, email: "demo@waautomation.com", name: "Riya Sharma", phone: "+91 90000 12345", country: "India" },
     organization: {
       id: DEMO_ORG_ID,
       name: "WA Automation Demo",
@@ -36,7 +36,7 @@ export const demoData = {
       id: "demo-waba",
       wabaId: "102290129340398",
       phoneNumberId: "106540352242922",
-      displayPhone: "+919266806659",
+      displayPhone: "+91 90000 00001",
       verifiedName: "WA Automation Demo",
       qualityRating: "high",
       messagingTier: "TIER_1K",
@@ -64,10 +64,10 @@ export const demoData = {
   },
 
   dashboardAccount: {
-    email: "ayush.goel1910@gmail.com",
-    mobile: "+91 7428720768",
+    email: "demo@waautomation.com",
+    mobile: "+91 90000 12345",
     country: "India",
-    name: "Ayush",
+    name: "Riya Sharma",
     organizationName: "WA Automation Demo",
     isDemo: true,
     plan: "trial",
@@ -89,7 +89,7 @@ export const demoData = {
     id: "demo-waba",
     waba_id: "102290129340398",
     phone_number_id: "106540352242922",
-    display_phone: "+91 92668 06659",
+    display_phone: "+91 90000 00001",
     verified_name: "WA Automation Demo",
     quality_rating: "high",
     messaging_tier: "TIER_1K",
@@ -102,7 +102,7 @@ export const demoData = {
     { id: "c1", wa_id: "7738293629", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(1), contact_tags: [], contact_groups: [] },
     { id: "c2", wa_id: "8928814237", name: null, email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(2), contact_tags: [], contact_groups: [] },
     { id: "c3", wa_id: "9811110594", name: "Piyush A", email: "piyush@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(3), contact_tags: [], contact_groups: [] },
-    { id: "c4", wa_id: "7428720768", name: "Ayush", email: "ayush.goel1910@gmail.com", attributes: {}, opt_in_status: "opted_in", source: "manual", created_at: daysAgo(4), contact_tags: [], contact_groups: [] },
+    { id: "c4", wa_id: "919000012345", name: "Riya Sharma", email: "demo@waautomation.com", attributes: {}, opt_in_status: "opted_in", source: "manual", created_at: daysAgo(4), contact_tags: [], contact_groups: [] },
     { id: "c5", wa_id: "7838349247", name: "Ankit Kumar", email: "ankit@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(8), contact_tags: [], contact_groups: [] },
     { id: "c6", wa_id: "9540724184", name: "Sagar", email: "sagar@example.com", attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(5), contact_tags: [], contact_groups: [] },
     { id: "c7", wa_id: "9636480218", name: "9636480218", email: null, attributes: {}, opt_in_status: "opted_in", source: "whatsapp", created_at: daysAgo(10), contact_tags: [], contact_groups: [] },
@@ -128,7 +128,7 @@ export const demoData = {
   conversations: {
     data: [
       { id: "conv1", status: "open", assigned_to: null, unread_count: 1, last_message_at: "2026-08-19T17:21:00.000Z", last_message_preview: "No messages yet", session_expires_at: null, contacts: { id: "c1", wa_id: "7738293629", name: null } },
-      { id: "conv2", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Thank you for reaching out!", session_expires_at: new Date(Date.now() + 3_600_000).toISOString(), contacts: { id: "c4", wa_id: "7428720768", name: "Ayush" } },
+      { id: "conv2", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Thank you for reaching out!", session_expires_at: new Date(Date.now() + 3_600_000).toISOString(), contacts: { id: "c4", wa_id: "919000012345", name: "Riya Sharma" } },
       { id: "conv3", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c6", wa_id: "9540724184", name: "Sagar" } },
       { id: "conv4", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(1), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c3", wa_id: "9811110594", name: "Piyush A" } },
       { id: "conv5", status: "open", assigned_to: null, unread_count: 0, last_message_at: daysAgo(8), last_message_preview: "Sent a template message", session_expires_at: null, contacts: { id: "c5", wa_id: "7838349247", name: "Ankit Kumar" } },

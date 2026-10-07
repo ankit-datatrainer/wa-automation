@@ -23,17 +23,17 @@ export const paginationSchema = z.object({
 
 // ---------- Auth ----------
 export const signUpSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email("Enter a valid email address"),
   password: z.string().min(8, "At least 8 characters"),
-  name: z.string().min(2),
-  organizationName: z.string().min(2),
+  name: z.string().min(2, "Enter your full name"),
+  organizationName: z.string().min(2, "Enter your business name"),
   phone: z.string().optional(),
   country: z.string().length(2).optional(),
 });
 
 export const signInSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().email("Enter a valid email address"),
+  password: z.string().min(1, "Enter your password"),
 });
 
 // ---------- Contacts ----------

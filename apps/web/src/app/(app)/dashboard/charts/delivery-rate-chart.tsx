@@ -1,124 +1,144 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { CheckCheck } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/states";
-import { api } from "@/lib/api-client";
+import { Card } from "@/components/ui/card";
+import { ErrorState, Skeleton } from "@/components/ui/states";
+import { AnimatedNumber, motion } from "@/components/motion";
+import { cn } from "@/lib/utils";
+import { ChartTooltip } from "./chart-tooltip";
+import { CHART_COLORS, useOverview } from "./use-overview";
 
-interface OverviewResponse {
-  series: unknown[];
-  totals: {
-    inbound: number;
-    outbound: number;
-    delivered: number;
-    read: number;
-    failed: number;
-    deliveryRate: number;
-  };
-}
-
-const SEGMENTS = [
-  { key: "read", label: "Read", color: "hsl(199, 89%, 48%)" },
-  { key: "deliveredOnly", label: "Delivered", color: "hsl(142, 71%, 40%)" },
-  { key: "sentOnly", label: "Sent (undelivered)", color: "hsl(215, 16%, 60%)" },
-  { key: "failed", label: "Failed", color: "hsl(0, 72%, 51%)" },
-] as const;
-
-export function DeliveryRateChart() {
-  const { data, isLoading } = useQuery({
-    queryKey: ["analytics", "overview"],
-    queryFn: () => api.get<OverviewResponse>("/analytics/overview", { days: 30 }),
-  });
+export function DeliveryRateChart({ days }: { days: number }) {
+  const { data, isLoading, isError, refetch } = useOverview(days);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const totals = data?.totals;
-  const pie = totals
+  const segments = totals
     ? [
-        { name: "Read", value: totals.read, color: SEGMENTS[0].color },
-        {
-          name: "Delivered",
-          value: totals.delivered - totals.read,
-          color: SEGMENTS[1].color,
-        },
+        { name: "Read", value: totals.read, color: CHART_COLORS.purple },
+        { name: "Delivered", value: Math.max(0, totals.delivered - totals.read), color: CHART_COLORS.lilac },
         {
           name: "Sent (undelivered)",
           value: Math.max(0, totals.outbound - totals.delivered - totals.failed),
-          color: SEGMENTS[2].color,
+          color: CHART_COLORS.lavender,
         },
-        { name: "Failed", value: totals.failed, color: SEGMENTS[3].color },
-      ].filter((s) => s.value > 0)
+        { name: "Failed", value: totals.failed, color: CHART_COLORS.rose },
+      ]
     : [];
-
-  const rate = totals?.deliveryRate ?? 0;
+  const pie = segments.filter((s) => s.value > 0);
+  const total = pie.reduce((sum, s) => sum + s.value, 0);
+  const rate = (totals?.deliveryRate ?? 0) * 100;
+  const active = activeIndex !== null ? pie[activeIndex] : undefined;
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
+    <Card className="flex h-full flex-col">
+      <div className="flex items-start justify-between gap-3 p-5 sm:p-6">
         <div>
-          <CardTitle className="text-base">Delivery Rate</CardTitle>
-          <CardDescription>Message delivery breakdown over the last 30 days</CardDescription>
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-50 text-primary">
+              <CheckCheck size={16} />
+            </span>
+            <h3 className="font-display text-lg font-semibold tracking-tight">Delivery rate</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">Outbound outcome, last {days} days</p>
         </div>
-        {totals && (
-          <span className="text-2xl font-bold text-primary">
-            {(rate * 100).toFixed(1)}%
-          </span>
-        )}
-      </CardHeader>
-      <CardContent>
+      </div>
+
+      <div className="flex flex-1 flex-col px-5 pb-6 sm:px-6">
         {isLoading ? (
-          <Skeleton className="h-64" />
+          <Skeleton className="h-[260px]" />
+        ) : isError ? (
+          <ErrorState message="Could not load delivery stats." onRetry={() => void refetch()} />
         ) : pie.length === 0 ? (
-          <div className="grid h-64 place-items-center text-sm text-muted-foreground">
-            No outbound messages yet to calculate delivery rate.
+          <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-brand-200 bg-brand-50/40 px-6 py-12 text-center">
+            <div>
+              <p className="font-display text-base font-semibold">Nothing sent yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Your delivery breakdown appears once outbound messages go out.
+              </p>
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-8">
-            <ResponsiveContainer width={220} height={220} className="shrink-0">
-              <PieChart>
-                <Pie
-                  data={pie}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  strokeWidth={0}
+          <>
+            <div className="relative mx-auto h-[200px] w-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pie}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={68}
+                    outerRadius={94}
+                    paddingAngle={3}
+                    cornerRadius={8}
+                    strokeWidth={0}
+                    animationDuration={700}
+                    onMouseEnter={(_, index) => setActiveIndex(index)}
+                    onMouseLeave={() => setActiveIndex(null)}
+                  >
+                    {pie.map((entry, index) => (
+                      <Cell
+                        key={entry.name}
+                        fill={entry.color}
+                        opacity={activeIndex === null || activeIndex === index ? 1 : 0.35}
+                        style={{ transition: "opacity 200ms ease", outline: "none" }}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+                <motion.div
+                  key={active?.name ?? "rate"}
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.25 }}
                 >
-                  {pie.map((entry, index) => (
-                    <Cell key={index} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(0 0% 100%)",
-                    border: "1px solid hsl(214, 20%, 91%)",
-                    borderRadius: "0.5rem",
-                    fontSize: 13,
-                  }}
-                  formatter={(value: number) => value.toLocaleString()}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+                  {active ? (
+                    <>
+                      <p className="font-display text-2xl font-bold tabular-nums">
+                        {((active.value / total) * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-xs font-medium text-muted-foreground">{active.name}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-display text-3xl font-bold text-gradient">
+                        <AnimatedNumber value={rate} format={(n) => `${n.toFixed(1)}%`} />
+                      </p>
+                      <p className="text-xs font-medium text-muted-foreground">delivered</p>
+                    </>
+                  )}
+                </motion.div>
+              </div>
+            </div>
 
-            <ul className="space-y-3 text-sm">
-              {pie.map((segment) => (
-                <li key={segment.name} className="flex items-center gap-2.5">
-                  <span
-                    className="inline-block h-3 w-3 shrink-0 rounded-full"
-                    style={{ background: segment.color }}
-                  />
-                  <span className="text-muted-foreground">{segment.name}</span>
-                  <span className="ml-auto font-semibold tabular-nums">
-                    {segment.value.toLocaleString()}
-                  </span>
-                </li>
-              ))}
+            <ul className="mt-5 grid grid-cols-2 gap-2">
+              {segments.map((segment) => {
+                const index = pie.findIndex((p) => p.name === segment.name);
+                return (
+                  <li
+                    key={segment.name}
+                    onMouseEnter={() => index >= 0 && setActiveIndex(index)}
+                    onMouseLeave={() => setActiveIndex(null)}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 text-xs transition-colors",
+                      index >= 0 && activeIndex === index && "border-brand-100 bg-brand-50/60",
+                    )}
+                  >
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color }} />
+                    <span className="truncate text-muted-foreground">{segment.name}</span>
+                    <span className="ml-auto font-semibold tabular-nums">{segment.value.toLocaleString()}</span>
+                  </li>
+                );
+              })}
             </ul>
-          </div>
+          </>
         )}
-      </CardContent>
+      </div>
     </Card>
   );
 }

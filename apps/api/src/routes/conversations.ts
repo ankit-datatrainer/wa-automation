@@ -48,16 +48,6 @@ conversationsRouter.get(
     if (error) throw error;
 
     let conversations = data ?? [];
-    if (conversations.length === 0) {
-      conversations = demoData.conversations.data as unknown as typeof conversations;
-      if (q.filter === "unread") {
-        conversations = conversations.filter((c) => c.unread_count > 0);
-      } else if (q.filter === "active") {
-        conversations = conversations.filter(
-          (c) => c.session_expires_at && new Date(c.session_expires_at).getTime() > Date.now(),
-        );
-      }
-    }
 
     if (q.search) {
       const needle = q.search.toLowerCase();
@@ -86,34 +76,26 @@ conversationsRouter.get(
 
     const q = getQuery<{ before?: string; limit: number }>(res);
 
-    try {
-      const conversation = await loadConversation(req.auth!.organizationId, req.params.id!);
+    const conversation = await loadConversation(req.auth!.organizationId, req.params.id!);
 
-      let query = supabaseAdmin
-        .from("messages")
-        .select("id, direction, type, content, wamid, status, error, sent_by, sent_at, template_id")
-        .eq("conversation_id", conversation.id);
+    let query = supabaseAdmin
+      .from("messages")
+      .select("id, direction, type, content, wamid, status, error, sent_by, sent_at, template_id")
+      .eq("conversation_id", conversation.id);
 
-      if (q.before) query = query.lt("sent_at", q.before);
+    if (q.before) query = query.lt("sent_at", q.before);
 
-      const { data, error } = await query
-        .order("sent_at", { ascending: false })
-        .limit(q.limit);
+    const { data, error } = await query
+      .order("sent_at", { ascending: false })
+      .limit(q.limit);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      if (!data || data.length === 0) {
-        return res.json(demoData.messages(req.params.id!));
-      }
-
-      res.json({
-        data: data.reverse(),
-        sessionExpiresAt: conversation.session_expires_at,
-        canSendFreeform: isSessionOpen(conversation.session_expires_at),
-      });
-    } catch {
-      return res.json(demoData.messages(req.params.id!));
-    }
+    res.json({
+      data: (data ?? []).reverse(),
+      sessionExpiresAt: conversation.session_expires_at,
+      canSendFreeform: isSessionOpen(conversation.session_expires_at),
+    });
   }),
 );
 

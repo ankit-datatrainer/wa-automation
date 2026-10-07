@@ -1,6 +1,7 @@
 "use client";
 
 import { PageHeader } from "@/components/layout/page-header";
+import { FadeIn } from "@/components/motion";
 import { ChatHistoryTable } from "../../chat-history/chat-history-table";
 
 export default function AnalyticsChatsPage() {
@@ -10,7 +11,9 @@ export default function AnalyticsChatsPage() {
         title="Chat History"
         description="Conversation-level analytics across your whole account."
       />
-      <ChatHistoryTable />
+      <FadeIn>
+        <ChatHistoryTable />
+      </FadeIn>
     </>
   );
 }

@@ -20,18 +20,19 @@ supportRouter.get(
     const q = getQuery<{ page: number; pageSize: number; status?: string }>(res);
     const from = (q.page - 1) * q.pageSize;
 
-    const { data, count, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("support_tickets")
       .select("id, subject, status, priority, created_at, resolved_at, users!support_tickets_created_by_fkey(name, email)", {
         count: "exact",
       })
-      .eq("organization_id", req.auth!.organizationId)
+      .eq("organization_id", req.auth!.organizationId);
+    if (q.status) query = query.eq("status", q.status);
+
+    const { data, count, error } = await query
       .order("created_at", { ascending: false })
       .range(from, from + q.pageSize - 1);
 
-    if (error || !data || data.length === 0) {
-      return res.json(demoData.supportTickets);
-    }
+    if (error) throw error;
 
     res.json({
       data: data ?? [],

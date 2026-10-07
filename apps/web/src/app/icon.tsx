@@ -18,10 +18,10 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(135deg, #00E67A 0%, #00C268 50%, #009A52 100%)",
+          background: "linear-gradient(135deg, #6D28D9 0%, #833AB4 45%, #C13584 80%, #E1306C 100%)",
           borderRadius: "18px",
           padding: "8px",
-          boxShadow: "0 4px 16px rgba(0, 194, 104, 0.4)",
+          boxShadow: "0 4px 16px rgba(131, 58, 180, 0.4)",
         }}
       >
         <svg
